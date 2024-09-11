@@ -98,3 +98,9 @@ For comparison, a copy of the expected results can be found in `ae\expected_resu
 ## User Guide
 
 A guide on "How to Run a LLMCompass Simulation" is shown [here](./docs/run.md).
+
+
+
+
+
+set PYTHONIOENCODING=utf-8

@@ -89,28 +89,33 @@ def test_core_size(core_configs, lock):
             )
 
 
-lock = Lock()
-configs = [
-    ("A", 128, 4, 8, 8, 192),
-    ("B", 128, 4, 16, 32, 192),
-    ("C", 128, 1, 32, 128, 192),
-    ("D", 32, 1, 64, 512, 768),
-    ("E", 8, 1, 128, 2048, 3072),
-]
+if __name__ == '__main__':
 
-processes = [Process(target=test_core_size, args=(i, lock)) for i in configs]
+    #from multiprocessing import freeze_support
+    #freeze_support()
 
-try:
-    for p in processes:
-        p.start()
+    lock = Lock()
+    configs = [
+        ("A", 128, 4, 8, 8, 192),
+        ("B", 128, 4, 16, 32, 192),
+        ("C", 128, 1, 32, 128, 192),
+        ("D", 32, 1, 64, 512, 768),
+        ("E", 8, 1, 128, 2048, 3072),
+    ]
 
-    while any(p.is_alive() for p in processes):
-        time.sleep(1)
-except KeyboardInterrupt:
-    print("Terminating processes...")
-    for p in processes:
-        p.terminate()
-        p.join()
+    processes = [Process(target=test_core_size, args=(i, lock)) for i in configs]
+
+    try:
+        for p in processes:
+         p.start()
+
+         while any(p.is_alive() for p in processes):
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Terminating processes...")
+        for p in processes:
+            p.terminate()
+            p.join()
 
 
-print("All processes have finished.")
+    print("All processes have finished.")

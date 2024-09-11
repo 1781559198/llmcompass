@@ -62,25 +62,26 @@ def test_SRAM_KB(SRAM_KB, lock):
 # for SRAM_KB in [64, 128, 192, 256, 512, 1024]:
 #     test_SRAM_KB(SRAM_KB, None)
 
-lock = Lock()
-processes = [
-    Process(target=test_SRAM_KB, args=(i, lock)) for i in [64, 128, 192, 256, 512, 1024]
-]
+if __name__ == '__main__':
+    lock = Lock()
+    processes = [
+        Process(target=test_SRAM_KB, args=(i, lock)) for i in [64, 128, 192, 256, 512, 1024]
+    ]
 
-try:
-    for p in processes:
-        p.start()
+    try:
+        for p in processes:
+            p.start()
 
-    while any(p.is_alive() for p in processes):
-        time.sleep(1)
-except KeyboardInterrupt:
-    print("Terminating processes...")
-    for p in processes:
-        p.terminate()
-        p.join()
+        while any(p.is_alive() for p in processes):
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Terminating processes...")
+        for p in processes:
+            p.terminate()
+            p.join()
 
 
-print("All processes have finished.")
+    print("All processes have finished.")
 
 # for SRAM_KB in [64, 128, 192, 256, 512, 1024]:
 #     arch_specs["device"]["compute_chiplet"]["core"][

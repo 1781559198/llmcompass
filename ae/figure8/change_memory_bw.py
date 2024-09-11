@@ -78,23 +78,25 @@ def test_memory_bandwidth(memory_bandwidth, lock):
             )
 
 
-lock = Lock()
-processes = [
-    Process(target=test_memory_bandwidth, args=(i, lock))
-    for i in [1, 2, 3, 4, 5, 6, 7, 8]
-]
+if __name__ == '__main__':
 
-try:
-    for p in processes:
-        p.start()
+    lock = Lock()
+    processes = [
+        Process(target=test_memory_bandwidth, args=(i, lock))
+        for i in [1, 2, 3, 4, 5, 6, 7, 8]
+    ]
 
-    while any(p.is_alive() for p in processes):
-        time.sleep(1)
-except KeyboardInterrupt:
-    print("Terminating processes...")
-    for p in processes:
-        p.terminate()
-        p.join()
+    try:
+        for p in processes:
+            p.start()
+
+        while any(p.is_alive() for p in processes):
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Terminating processes...")
+        for p in processes:
+            p.terminate()
+            p.join()
 
 
-print("All processes have finished.")
+    print("All processes have finished.")
