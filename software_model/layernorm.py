@@ -54,7 +54,7 @@ class LayerNorm(Operator):
             self.data_type = data_type
 
     class Mapping:
-        def __init__(
+        def __init__(# 表示和管理内存映射配置
             self,
             l2_tile_M: int,
             l2_tile_N: int,
@@ -196,7 +196,7 @@ class LayerNorm(Operator):
                 * data_type.word_size
                 / (
                     chiplet_module.io_module.bandwidth
-                    / chiplet_module.compute_module.clock_freq
+                    / chiplet_module.compute_module.clock_freq #硬件时间频率
                 )
             )
 
@@ -294,17 +294,17 @@ class LayerNorm(Operator):
                 / pcb_module.compute_module.core.vector_unit.vector_width
             )
 
-            # each lane computes it own mean
+            # each lane computes it own mean  均值计算
             total_cycle_count = ceil(
                 N_per_vector_lane
                 * M_per_vector_lane
                 / pcb_module.compute_module.core.vector_unit.flops_per_cycle
             )
-            # the whole vector reduce to one mean
+            # the whole vector reduce to one mean  规约操作
             total_cycle_count += log2(
                 pcb_module.compute_module.core.vector_unit.vector_width
             )
-            # each lane computes it own variance
+            # each lane computes it own variance  方差计算
             total_cycle_count += (
                 ceil(
                     N_per_vector_lane
@@ -313,11 +313,11 @@ class LayerNorm(Operator):
                 )
                 * 2
             )
-            # the whole vector reduce to one variance
+            # the whole vector reduce to one variance  规约操作
             total_cycle_count += log2(
                 pcb_module.compute_module.core.vector_unit.vector_width
             )
-            # calculate normalized output
+            # calculate normalized output  标准化输出
             total_cycle_count += (
                 ceil(
                     N_per_vector_lane

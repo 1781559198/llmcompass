@@ -5,6 +5,7 @@ from software_model.transformer import (
 from software_model.utils import data_type_dict, Tensor
 from hardware_model.system import system_dict
 import argparse
+from gpt3_model import GPT3InitComputation, GPT3AutoRegression
 
 
 if __name__ == "__main__":
@@ -21,7 +22,7 @@ if __name__ == "__main__":
     if args.init:
         print("Initial computation")
         if args.simgpu:
-            model = TransformerBlockInitComputationTP(
+            model = GPT3InitComputation(
                 d_model=12288,
                 n_heads=96,
                 device_count=4,
@@ -39,7 +40,7 @@ if __name__ == "__main__":
                 model.compile_and_simulate(A100_system, compile_mode="heuristic-GPU")
                 file_name = "transformer_A100_sim.csv"
         if args.simtpu:
-            model = TransformerBlockInitComputationTP(
+            model = GPT3InitComputation(
                 d_model=12288,
                 n_heads=96,
                 device_count=8,
@@ -54,7 +55,7 @@ if __name__ == "__main__":
                 model.compile_and_simulate(TPU_system, compile_mode="heuristic-TPU")
                 file_name = "transformer_TPUv3_sim.csv"
         if args.gpu:
-            model = TransformerBlockInitComputationTP(
+            model = GPT3InitComputation(
                 d_model=12288,
                 n_heads=96,
                 device_count=4,
@@ -66,7 +67,7 @@ if __name__ == "__main__":
         print("Auto-regression")
         output_token_length = 1024
         if args.simgpu:
-            model = TransformerBlockAutoRegressionTP(
+            model = GPT3AutoRegression(
                 d_model=12288,
                 n_heads=96,
                 device_count=4,
@@ -83,7 +84,7 @@ if __name__ == "__main__":
                 model.compile_and_simulate(A100_system, compile_mode="heuristic-GPU")
                 file_name = "transformerAR_A100_sim.csv"
         if args.simtpu:
-            model = TransformerBlockAutoRegressionTP(
+            model = GPT3AutoRegression(
                 d_model=12288,
                 n_heads=96,
                 device_count=8,
@@ -100,7 +101,7 @@ if __name__ == "__main__":
                 model.compile_and_simulate(TPU_system, compile_mode="heuristic-TPU")
                 file_name = "transformerAR_TPUv3_sim.csv"
         if args.gpu:
-            model = TransformerBlockAutoRegressionTP(
+            model = GPT3AutoRegression(
                 d_model=12288,
                 n_heads=96,
                 device_count=4,

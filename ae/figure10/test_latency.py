@@ -99,19 +99,19 @@ for bs in [16]:  # [1, 4, 8, 16, 32, 64]:
             )
             processes.append(p)
 
+if __name__ == '__main__':
+    try:
+        for p in processes:
+            p.start()
+        print("Processes started.")
+        print("number of process:", len(processes))
+        while any(p.is_alive() for p in processes):
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Terminating processes...")
+        for p in processes:
+            p.terminate()
+            p.join()
 
-try:
-    for p in processes:
-        p.start()
-    print("Processes started.")
-    print("number of process:", len(processes))
-    while any(p.is_alive() for p in processes):
-        time.sleep(1)
-except KeyboardInterrupt:
-    print("Terminating processes...")
-    for p in processes:
-        p.terminate()
-        p.join()
 
-
-print("All processes have finished.")
+    print("All processes have finished.")

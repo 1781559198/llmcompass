@@ -130,18 +130,20 @@ for input_seq_len in [
 
 print(len(processes))
 # exit()
-try:
-    for p in processes:
-        p.start()
-    print("Processes started.")
-    print("number of process:", len(processes))
-    while any(p.is_alive() for p in processes):
-        time.sleep(1)
-except KeyboardInterrupt:
-    print("Terminating processes...")
-    for p in processes:
-        p.terminate()
-        p.join()
+
+if __name__ == '__main__':
+    try:
+        for p in processes:
+            p.start()
+        print("Processes started.")
+        print("number of process:", len(processes))
+        while any(p.is_alive() for p in processes):
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Terminating processes...")
+        for p in processes:
+            p.terminate()
+            p.join()
 
 
-print("All processes have finished.")
+    print("All processes have finished.")

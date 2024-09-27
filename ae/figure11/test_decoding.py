@@ -58,17 +58,18 @@ for bs in [1, 2, 4, 8, 16, 32, 64]:
             p = Process(target=simulate_latency, args=(system, bs, seq_len, name, lock))
             processes.append(p)
 
-try:
-    for p in processes:
-        p.start()
+if __name__ == '__main__':
+    try:
+        for p in processes:
+            p.start()
 
-    while any(p.is_alive() for p in processes):
-        time.sleep(1)
-except KeyboardInterrupt:
-    print("Terminating processes...")
-    for p in processes:
-        p.terminate()
-        p.join()
+        while any(p.is_alive() for p in processes):
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Terminating processes...")
+        for p in processes:
+            p.terminate()
+            p.join()
 
 
-print("All processes have finished.")
+    print("All processes have finished.")
