@@ -8,6 +8,7 @@ from software_model.matmul import Matmul, BatchedMatmul
 from software_model.softmax import Softmax
 from software_model.layernorm import LayerNorm
 from software_model.gelu import GeLU
+from software_model.silu import SiLU
 
 
 from software_model.utils import Tensor, DataType
@@ -422,6 +423,7 @@ class TransformerBlockAutoRegressionTP(Operator):
         # # feed-forward network
         self.H_matmul1 = Matmul(data_type)
         self.H_gelu = GeLU(data_type)
+        self.H_silu = SiLU(data_type)
         self.H_matmul2 = Matmul(data_type)
         self.layer_norm1 = LayerNorm(data_type)
         self.allreduce_ffn = AllReduceMultiPCB(data_type)
@@ -479,7 +481,11 @@ class TransformerBlockAutoRegressionTP(Operator):
         # feed-forward network
         h1 = self.H_matmul1(h0, self.W1)  # [b, 1, 4 * d / dev_cnt]
         assert h1.shape == [b, 1, 4 * d // dev_cnt]
+        
         h1 = self.H_gelu(h1)
+
+        h1 = self.H_silu(h1)      
+
         h2 = self.H_matmul2(h1, self.W2)  #  [b, 1, d]
         assert h2.shape == [b, 1, d]
         h2 = self.layer_norm1(h2)
@@ -643,6 +649,13 @@ class TransformerBlockAutoRegressionTP(Operator):
             + pcb.compute_module.overhead.gelu
         )
 
+        # silu
+        silu_latency = (
+            self.H_silu.compile_and_simulate(pcb, compile_mode)
+            + pcb.compute_module.overhead.gelu
+        )
+
+
         # allreduce
         if self.device_count > 1:
             allreduce_latency = self.allreduce_mha.simulate(interconnect)
@@ -665,10 +678,10 @@ class TransformerBlockAutoRegressionTP(Operator):
         self.latency = (
             matmul_total_latency
             + normlization_total_latency
-            + gelu_latency
+            + silu_latency
             + allreduce_total_latency
         )
-        self.simluate_log = f"{qkv_latency}, {q_mul_k_latency}, {a_mul_v_latency}, {h_matmul0_latency}, {h1_matmul1_latency}, {h2_matmul2_latency}, {softmax_latency}, {layernorm_latency}, {layernorm_latency}, {gelu_latency}, {allreduce_latency}, {allreduce_latency}"
+        self.simluate_log = f"{qkv_latency}, {q_mul_k_latency}, {a_mul_v_latency}, {h_matmul0_latency}, {h1_matmul1_latency}, {h2_matmul2_latency}, {softmax_latency}, {layernorm_latency}, {layernorm_latency}, {silu_latency}, {allreduce_latency}, {allreduce_latency}"
         return self.latency
 
     def run_on_gpu(self):
