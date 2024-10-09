@@ -228,7 +228,6 @@ class SiLU(Operator):
                 ceil(l1_tile_count / pcb_module.compute_module.core_count) + 1
             ) * (
                 l1_tile_cycle_count
-                + log2(ceil(N / l1_tile_N)) * l1_tile.reduction_cycle_count
             )
             return total_cycle_count
 
