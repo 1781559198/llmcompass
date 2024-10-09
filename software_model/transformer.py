@@ -9,6 +9,7 @@ from software_model.softmax import Softmax
 from software_model.layernorm import LayerNorm
 from software_model.gelu import GeLU
 from software_model.silu import SiLU
+from software_model.rmsnorm import RMSNorm
 
 
 from software_model.utils import Tensor, DataType
@@ -426,6 +427,7 @@ class TransformerBlockAutoRegressionTP(Operator):
         self.H_silu = SiLU(data_type)
         self.H_matmul2 = Matmul(data_type)
         self.layer_norm1 = LayerNorm(data_type)
+        self.rmsnorm1 = RMSNorm(data_type)
         self.allreduce_ffn = AllReduceMultiPCB(data_type)
 
     def __call__(self, x: Tensor, seq_len: int) -> Tensor:
@@ -483,12 +485,13 @@ class TransformerBlockAutoRegressionTP(Operator):
         assert h1.shape == [b, 1, 4 * d // dev_cnt]
         
         h1 = self.H_gelu(h1)
-
         h1 = self.H_silu(h1)      
 
         h2 = self.H_matmul2(h1, self.W2)  #  [b, 1, d]
         assert h2.shape == [b, 1, d]
+
         h2 = self.layer_norm1(h2)
+        h2 = self.rmsnorm1(h2)
         if dev_cnt > 1:
             h2 = self.allreduce_ffn(h2)
 
@@ -640,6 +643,10 @@ class TransformerBlockAutoRegressionTP(Operator):
             self.layer_norm0.compile_and_simulate(pcb, compile_mode)
             + pcb.compute_module.overhead.layernorm
         )
+        rmsnorm_latency = (
+            self.rmsnorm1.compile_and_simulate(pcb, compile_mode)
+            + pcb.compute_module.overhead.rmsnorm   # 自定义
+        )
 
         normlization_total_latency = softmax_latency + layernorm_latency * 2
 
@@ -652,7 +659,7 @@ class TransformerBlockAutoRegressionTP(Operator):
         # silu
         silu_latency = (
             self.H_silu.compile_and_simulate(pcb, compile_mode)
-            + pcb.compute_module.overhead.gelu
+            + pcb.compute_module.overhead.silu # 自定义
         )
 
 

@@ -221,7 +221,7 @@ class RMSNorm(Operator):
             )
             l1_tile_count = ceil(M / l1_tile_M) * ceil(N / l1_tile_N)
             l1_tile_cycle_count = (
-                l1_tile.read_cycle_count * 3
+                l1_tile.read_cycle_count
                 + l1_tile.write_cycle_count
                 + l1_tile.compute_cycle_count
             )
@@ -296,7 +296,7 @@ class RMSNorm(Operator):
             )
 
             # 每个 lane 计算自己的 RMS
-            # 计算 x_i^2 的总和
+            # RMSNorm: Calculate the sum of squares (平方和)
             total_cycle_count = ceil(
                 N_per_vector_lane
                 * M_per_vector_lane
@@ -306,15 +306,6 @@ class RMSNorm(Operator):
             total_cycle_count += log2(
                 pcb_module.compute_module.core.vector_unit.vector_width
             )
-            # 计算平方和的均值
-            total_cycle_count += ceil(
-                N_per_vector_lane
-                / pcb_module.compute_module.core.vector_unit.flops_per_cycle
-            )
-            # 计算平方和的平方根
-            total_cycle_count += ceil(
-                1 / pcb_module.compute_module.core.vector_unit.flops_per_cycle
-            )  # sqrt 操作的 FLOP 计数假设为 1
             # 标准化输出
             total_cycle_count += (
                 ceil(
@@ -322,7 +313,7 @@ class RMSNorm(Operator):
                     * M_per_vector_lane
                     / pcb_module.compute_module.core.vector_unit.flops_per_cycle
                 )
-                * 3  # 除法和乘法
+                * 2  # 除法和乘法
             )
 
             return total_cycle_count

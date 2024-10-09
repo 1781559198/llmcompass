@@ -284,6 +284,7 @@ class LayerNorm(Operator):
             mapping: "LayerNorm.Mapping",
             pcb_module: Device,
         ):
+            # 计算向量大小
             M_per_vector_count = ceil(
                 M / pcb_module.compute_module.core.vector_unit.vector_count
             )
