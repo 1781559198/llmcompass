@@ -9,6 +9,10 @@ import statistics
 import numpy as np
 import torch
 
+# 解决没有triton没有的错误
+import torch._dynamo
+torch._dynamo.config.suppress_errors = True
+
 
 @torch.compile
 def layernorm_gpu(input: torch.Tensor) -> torch.Tensor:
@@ -312,7 +316,7 @@ class LayerNorm(Operator):
                     * M_per_vector_lane
                     / pcb_module.compute_module.core.vector_unit.flops_per_cycle
                 )
-                * 2
+                * 2# 平方
             )
             # the whole vector reduce to one variance  规约操作
             total_cycle_count += log2(

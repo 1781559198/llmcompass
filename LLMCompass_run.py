@@ -22,9 +22,13 @@ _ = model_auto_regression(
 	seq_len,
 )
 
-print("Starting simulation...")
-auto_regression_latency_simulated = model_auto_regression.compile_and_simulate(
-	system, "heuristic-GPU"
+# print("Starting simulation...")
+# auto_regression_latency_simulated = model_auto_regression.compile_and_simulate(
+# 	system, "heuristic-GPU"
+# )
+
+auto_regression_latency_simulated = model_auto_regression.run_on_gpu(
 )
+
 print("Simulation completed!")
 print(f"Simulated latency: {auto_regression_latency_simulated}")

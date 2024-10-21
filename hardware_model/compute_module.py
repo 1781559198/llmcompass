@@ -101,18 +101,20 @@ core_dict = {
 
 
 class Overhead:
-    def __init__(self, matmul, softmax, layernorm, gelu, silu, rmsnorm):
+    def __init__(self, matmul, softmax, layernorm, gelu, silu, rmsnorm, rope):
         self.matmul = matmul
         self.softmax = softmax
         self.layernorm = layernorm
         self.gelu = gelu
+       
         self.silu = silu
         self.rmsnorm = rmsnorm
+        self.rope = rope
 
 overhead_dict = {
-    "A100": Overhead(2.1e-5, 1.2e-5, 4.5e-5, 4.5e-5, 4.0e-5, 3.5e-5),
-    "TPUv3": Overhead(11e-5, 30e-5, 14e-5, 10e-5, 9.0e-5, 10e-5),
-    "MI210": Overhead(3.4e-5, 2.2e-5, 2.8e-5, 2.1e-5, 2.0e-5, 2.0e-5),
+    "A100": Overhead(2.1e-5, 1.2e-5, 4.5e-5, 4.5e-5, 4.0e-5, 3.5e-5, 3.5e-5),
+    "TPUv3": Overhead(11e-5, 30e-5, 14e-5, 10e-5, 9.0e-5, 10e-5, 10e-5),
+    "MI210": Overhead(3.4e-5, 2.2e-5, 2.8e-5, 2.1e-5, 2.0e-5, 2.0e-5, 2.0e-5),
 }
 
 

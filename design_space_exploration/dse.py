@@ -122,7 +122,7 @@ def test_template_to_system():
     model.roofline_model(A100_system)
 
 
-def find_cheapest_design(
+def find_cheapest_design(# 搜索计算硬件架构的最佳设计
     d_model,
     n_heads,
     n_layers,

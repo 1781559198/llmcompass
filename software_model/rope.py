@@ -8,31 +8,41 @@ import time
 import statistics
 import numpy as np
 import torch
+import math
 
 
 @torch.compile
-def rmsnorm_gpu(input: torch.Tensor) -> torch.Tensor:
-    return input / torch.sqrt(torch.mean(input ** 2, dim=-1, keepdim=True) + 1e-5)
+def rope_gpu(input: torch.Tensor, sin_emb: torch.Tensor, cos_emb: torch.Tensor) -> torch.Tensor:
+    return (input * cos_emb) + (rotate_half(input) * sin_emb)
 
 
-class RMSNorm(Operator):
+def rotate_half(x: torch.Tensor) -> torch.Tensor:
+    x1 = x[..., :x.shape[-1]//2]
+    x2 = x[..., x.shape[-1]//2:]
+    return torch.cat([-x2, x1], dim=-1)
+
+
+class RoPE(Operator):
     def __init__(self, data_type: DataType):
         super().__init__(0, 0, 0, 0, data_type)
         self.shape = None
 
-    def __call__(self, input: Tensor) -> Tensor:
+    def __call__(self, input: Tensor, position: int) -> Tensor:
         assert self.data_type == input.data_type
         self.shape = input.shape
         self.M = size(input.shape[:-1])
         self.N = input.shape[-1]
+        self.position = position
         self.computational_graph = self.ComputationalGraph(
-            self.M, self.N, self.data_type
+            self.M, self.N, self.data_type, self.position
         )
         return input
 
     def roofline_model(self, pcb_module: Device):
-        self.io_count = self.M * self.N * self.data_type.word_size * 2
-        self.flop_count = self.M * self.N * 5  # RMSNorm 通常需要较少的 FLOPs
+        # 计算 I/O 次数和 FLOP 次数
+        # RoPE 需要计算 sin 和 cos，以及元素级别的乘法和加法
+        self.io_count = self.M * self.N * self.data_type.word_size * 3  # 输入 x, sin_emb, cos_emb
+        self.flop_count = self.M * self.N * 6  # sin, cos, multiply, multiply, add, add
         self.roofline_latency = max(
             self.io_count
             / min(
@@ -48,10 +58,11 @@ class RMSNorm(Operator):
         print(f"{self.shape}, {self.latency_on_gpu * 1e6}us")
 
     class ComputationalGraph:
-        def __init__(self, M: int, N: int, data_type: DataType):
+        def __init__(self, M: int, N: int, data_type: DataType, position: int):
             self.M = M
             self.N = N
             self.data_type = data_type
+            self.position = position
 
     class Mapping:
         def __init__(  # 表示和管理内存映射配置
@@ -81,13 +92,16 @@ class RMSNorm(Operator):
         M = self.computational_graph.M
         N = self.computational_graph.N
         data_type = self.computational_graph.data_type
+        position = self.computational_graph.position
+
+        # 确定 L2 切片因子
         l2_tile_N = N
         l2_tile_M = (
             pcb_module.compute_module.l2_size // (l2_tile_N * data_type.word_size) // 2
         )
         l2_tile_M = min(l2_tile_M, M)
-        if compile_mode == "heuristic-GPU" or compile_mode == "heuristic-our-throughput":
-            # if N <= 1024:
+
+        if compile_mode in ["heuristic-GPU", "heuristic-our-throughput"]:
             l1_tile_N = N
             l1_tile_M = (
                 pcb_module.compute_module.core.SRAM_size
@@ -108,6 +122,11 @@ class RMSNorm(Operator):
                 2 * l1_tile_N * data_type.word_size
             )
             l1_tile_M = min(l1_tile_M, M)
+        else:
+            # 默认配置，您可以根据需要调整
+            l1_tile_N = ceil(N / 2)
+            l1_tile_M = ceil(M / 2)
+
         mapping = self.Mapping(
             l2_tile_M,
             l2_tile_N,
@@ -173,7 +192,7 @@ class RMSNorm(Operator):
             M: int,
             N: int,
             data_type: DataType,
-            mapping: "RMSNorm.Mapping",
+            mapping: "RoPE.Mapping",
             pcb_module: Device,
         ):
             self.M = M
@@ -206,13 +225,13 @@ class RMSNorm(Operator):
             M: int,
             N: int,
             data_type: DataType,
-            mapping: "RMSNorm.Mapping",
+            mapping: "RoPE.Mapping",
             pcb_module: Device,
         ):
             l1_tile_M = mapping.l1_tile_M
             l1_tile_N = mapping.l1_tile_N
 
-            l1_tile = RMSNorm.L1TileSimulator(
+            l1_tile = RoPE.L1TileSimulator(
                 l1_tile_M,
                 l1_tile_N,
                 data_type,
@@ -221,7 +240,7 @@ class RMSNorm(Operator):
             )
             l1_tile_count = ceil(M / l1_tile_M) * ceil(N / l1_tile_N)
             l1_tile_cycle_count = (
-                l1_tile.read_cycle_count
+                l1_tile.read_cycle_count * 2  # 读取 x 和 sin/cos embedding
                 + l1_tile.write_cycle_count
                 + l1_tile.compute_cycle_count
             )
@@ -229,7 +248,6 @@ class RMSNorm(Operator):
                 ceil(l1_tile_count / pcb_module.compute_module.core_count)
             ) * (
                 l1_tile_cycle_count
-                + (ceil(N / l1_tile_N) - 1) * (l1_tile.reduction_cycle_count)
             )
             return total_cycle_count
 
@@ -239,7 +257,7 @@ class RMSNorm(Operator):
             M: int,
             N: int,
             data_type: DataType,
-            mapping: "RMSNorm.Mapping",
+            mapping: "RoPE.Mapping",
             pcb_module: Device,
         ):
             self.M = M
@@ -254,17 +272,7 @@ class RMSNorm(Operator):
                 M, N, data_type, pcb_module
             )
             self.reduction_cycle_count = (
-                M
-                * N
-                / pcb_module.compute_module.core.vector_unit.total_vector_flops_per_cycle
-                + M
-                * N
-                * data_type.word_size
-                * 2
-                / (
-                    pcb_module.compute_module.l2_bandwidth_per_cycle
-                    / pcb_module.compute_module.core_count
-                )
+                0# rope函数没有规约操作
             )
 
         def simulate_l1_tile_io_cycle_count(
@@ -282,65 +290,41 @@ class RMSNorm(Operator):
             M: int,
             N: int,
             data_type: DataType,
-            mapping: "RMSNorm.Mapping",
+            mapping: "RoPE.Mapping",
             pcb_module: Device,
         ):
-            # 这边就是区分行和列
-            M_per_vector_count = ceil(# 矩阵在行方向上如何分配给多个向量单元。硬件中有多个向量单元一起并行工作，因此每个向量单元需要处理一定的行数
-                M / pcb_module.compute_module.core.vector_unit.vector_count
+            # RoPE 主要涉及 sin、cos 计算和元素级别的乘加操作
+            flops_per_element = 4  # sin, cos, multiply, add
+            total_flop_count = M * N * flops_per_element
+            return ceil(
+                total_flop_count
+                / pcb_module.compute_module.core.vector_unit.total_vector_flops_per_cycle
             )
-            N_per_vector_count = N
-            M_per_vector_lane = M_per_vector_count# 矩阵在列方向上如何进一步划分给向量单元处理。由于每个向量单元的宽度有限，
-                                                  #它们一次只能处理一部分列。这部分列称为向量宽度，需要根据硬件的能力进行划分
-            N_per_vector_lane = ceil(
-                N_per_vector_count
-                / pcb_module.compute_module.core.vector_unit.vector_width
-            )
-
-            # 每个 lane 计算自己的 RMS
-            # RMSNorm: Calculate the sum of squares (平方和)
-            total_cycle_count = ceil(
-                N_per_vector_lane
-                * M_per_vector_lane
-                / pcb_module.compute_module.core.vector_unit.flops_per_cycle
-            )
-            # 规约操作（平方和）
-            total_cycle_count += log2(
-                pcb_module.compute_module.core.vector_unit.vector_width
-            )
-            # 标准化输出
-            total_cycle_count += (
-                ceil(
-                    N_per_vector_lane
-                    * M_per_vector_lane
-                    / pcb_module.compute_module.core.vector_unit.flops_per_cycle
-                )
-                * 2  # 除法和乘法
-            )
-
-            return total_cycle_count
 
     def run_on_gpu(self):
-        # import torch
-        # from apex.normalization.fused_layer_norm import FusedLayerNorm
-        # from apex.contrib.layer_norm import FastLayerNorm
         assert self.shape is not None
         input = torch.randn(self.shape, dtype=torch.float16, device="cuda")
+        # 生成 sin 和 cos 的位置编码
+        position = self.position
+        dim = self.N
+        inv_freq = 1.0 / (10000 ** (torch.arange(0, dim, 2, device="cuda").float() / dim))
+        sinusoid = torch.einsum("i,j->ij", torch.arange(position, device="cuda").float(), inv_freq)
+        sin_emb = torch.sin(sinusoid).unsqueeze(0).expand_as(input)
+        cos_emb = torch.cos(sinusoid).unsqueeze(0).expand_as(input)
+
         latencies = []
 
         # 预热
         for _ in range(3):
-            _ = rmsnorm_gpu(input)
-
+            _ = rope_gpu(input, sin_emb, cos_emb)
             torch.cuda.synchronize()
         for _ in range(self.iterations):
             start = time.time()
-            output = rmsnorm_gpu(input)
+            output = rope_gpu(input, sin_emb, cos_emb)
             torch.cuda.synchronize()
             end = time.time()
             assert output.shape == input.shape
             latencies.append(end - start)
-        # print(latencies)
         self.latency_on_gpu = statistics.median(latencies)
         return self.latency_on_gpu
 
@@ -348,16 +332,16 @@ class RMSNorm(Operator):
     def gpu_kernel_launch_overhead():
         import torch
 
-        size = 1
         latencies = []
         a = torch.randn(1, 1, 1, device="cuda")
+        sin_emb = torch.sin(torch.tensor([[0.0]], device="cuda"))
+        cos_emb = torch.cos(torch.tensor([[0.0]], device="cuda"))
         for _ in range(50):
             start = time.time()
-            c = rmsnorm_gpu(a)
+            c = rope_gpu(a, sin_emb, cos_emb)
             torch.cuda.synchronize()
             end = time.time()
             latencies.append(end - start)
         avg_overhead = statistics.median(latencies)
-        # print('GPU kernel launch overhead: ', avg_overhead*1e3, 'ms')
         print(latencies)
         return avg_overhead

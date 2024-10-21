@@ -10,7 +10,7 @@ from software_model.layernorm import LayerNorm
 from software_model.gelu import GeLU
 from software_model.silu import SiLU
 from software_model.rmsnorm import RMSNorm
-
+from software_model.rope import RoPE
 
 from software_model.utils import Tensor, DataType
 from software_model.communication_primitives import AllReduceMultiPCB
@@ -428,6 +428,7 @@ class TransformerBlockAutoRegressionTP(Operator):
         self.H_matmul2 = Matmul(data_type)
         self.layer_norm1 = LayerNorm(data_type)
         self.rmsnorm1 = RMSNorm(data_type)
+        self.rope = RoPE(data_type)
         self.allreduce_ffn = AllReduceMultiPCB(data_type)
 
     def __call__(self, x: Tensor, seq_len: int) -> Tensor:
@@ -543,6 +544,11 @@ class TransformerBlockAutoRegressionTP(Operator):
             + h2_matmul2_latency
         )
 
+        rope_latency = (
+            self.rope.roofline_model(device)
+            + device.compute_module.overhead.rope
+        )
+
         # normalization
         softmax_latency = (
             self.A_softmax.roofline_model(device)
@@ -632,6 +638,11 @@ class TransformerBlockAutoRegressionTP(Operator):
             + h_matmul0_latency
             + h1_matmul1_latency
             + h2_matmul2_latency
+        )
+
+        rope_latency = (
+            self.rope.compile_and_simulate(pcb, compile_mode)
+            + pcb.compute_module.overhead.rope
         )
 
         # normalization   执行时间加硬件开销
