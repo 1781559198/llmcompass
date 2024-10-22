@@ -11,6 +11,7 @@ from software_model.gelu import GeLU
 from software_model.silu import SiLU
 from software_model.rmsnorm import RMSNorm
 from software_model.rope import RoPE
+from software_model.casual_mask import CausalMask
 
 from software_model.utils import Tensor, DataType
 from software_model.communication_primitives import AllReduceMultiPCB
@@ -19,7 +20,7 @@ from typing import List
 from hardware_model.system import System
 
 
-class TransformerBlockInitComputationTP(Operator):
+class Llama2BlockInitComputationTP(Operator):
     def __init__(self, d_model, n_heads, device_count, data_type: DataType):
         # d_model: 模型的隐藏层维度，也就是输入张量的特征维度
         # n_heads: 注意力机制中的头数（多头注意力机制）
@@ -59,6 +60,7 @@ class TransformerBlockInitComputationTP(Operator):
         self.H_matmul0 = Matmul(data_type)
         self.layer_norm0 = LayerNorm(data_type)
         self.allreduce_mha = AllReduceMultiPCB(data_type)
+        self.RoPE = RoPE(data_type)
         # # feed-forward network
         self.H_matmul1 = Matmul(data_type)
         self.H_gelu = GeLU(data_type)
@@ -377,7 +379,7 @@ class TransformerBlockInitComputationTP(Operator):
         return self.latency_on_gpu
 
 
-class TransformerBlockAutoRegressionTP(Operator):
+class Llama2BlockAutoRegressionTP(Operator):
     def __init__(self, d_model, n_heads, device_count, data_type: DataType):
         super().__init__(0, 0, 0, 0, data_type)
         self.d_model = d_model
@@ -414,19 +416,20 @@ class TransformerBlockAutoRegressionTP(Operator):
         self.K_concat = Concat(data_type)
         self.V_concat = Concat(data_type)
         self.Q_mul_K = BatchedMatmul(data_type)
+        self.causal_mask = CausalMask(data_type)
         self.A_softmax = Softmax(data_type)
         self.A_mul_V = BatchedMatmul(data_type)
         self.H_transpose = Transpose(data_type)
         self.H_reshape = Reshape(data_type)
         self.H_matmul0 = Matmul(data_type)
-        self.layer_norm0 = LayerNorm(data_type)
+        self.rmsnorm0 = RMSNorm(data_type)
         self.allreduce_mha = AllReduceMultiPCB(data_type)
+        self.RoPE = RoPE(data_type)
         # # feed-forward network
         self.H_matmul1 = Matmul(data_type)
         self.H_gelu = GeLU(data_type)
         self.H_silu = SiLU(data_type)
         self.H_matmul2 = Matmul(data_type)
-        self.layer_norm1 = LayerNorm(data_type)
         self.rmsnorm1 = RMSNorm(data_type)
         self.rope = RoPE(data_type)
         self.allreduce_ffn = AllReduceMultiPCB(data_type)
@@ -447,27 +450,43 @@ class TransformerBlockAutoRegressionTP(Operator):
         K_cache = Tensor([b, h // dev_cnt, d_h, s], self.data_type)
         V_cache = Tensor([b, h // dev_cnt, s, d_h], self.data_type)
 
+        x = self.rmsnorm0(x)# rmsnorm
+
         # multi-head attention
+        # 通过线性变换生成qkv向量
         q = self.Q_proj(x, self.Wq)  # [b, 1, d / dev_cnt]
         assert q.shape == [b, 1, d // dev_cnt]
         k = self.K_proj(x, self.Wk)  # [b, 1, d / dev_cnt]
         v = self.V_proj(x, self.Wv)  # [b, 1, d / dev_cnt]
-        q = self.Q_reshape(q, [b, 1, h // dev_cnt, d_h])
+
+        # RoPE旋转向量
+        q = self.rope(q, self.Wq)
+        k = self.rope(k, self.Wk)
+
+        # 对qkv重新调整状态，适应多头注意力机制
+        q = self.Q_reshape(q, [b, 1, h // dev_cnt, d_h])# 批次大小，序列长度，每个设备上的头数，每个头的维度
         k = self.K_reshape(k, [b, 1, h // dev_cnt, d_h])
         v = self.V_reshape(v, [b, 1, h // dev_cnt, d_h])
+
+        # 对qkv进行维度转置操作
         q_T = self.Q_transpose(q, [0, 2, 1, 3])  # [b, h / dev_cnt, 1, d_h]
         assert q_T.shape == [b, h // dev_cnt, 1, d_h]
         k_T = self.K_transpose(k, [0, 2, 3, 1])  # [b, h / dev_cnt, d_h, 1]
         assert k_T.shape == [b, h // dev_cnt, d_h, 1]
         v_T = self.V_transpose(v, [0, 2, 1, 3])  # [b, h / dev_cnt, 1, d_h]
         assert v_T.shape == [b, h // dev_cnt, 1, d_h]
+
         K_T = self.K_concat(K_cache, k_T, 3)  # [b, h / dev_cnt, d_h, s+1]
         assert K_T.shape == [b, h // dev_cnt, d_h, s + 1]
         V_T = self.V_concat(V_cache, v_T, 2)  # [b, h / dev_cnt, s+1, d_h]
         assert V_T.shape == [b, h // dev_cnt, s + 1, d_h]
+
         a = self.Q_mul_K(q_T, K_T)  # [b, h / dev_cnt, 1, s+1]
         assert a.shape == [b, h // dev_cnt, 1, s + 1]
+        a = self.causal_mask(a)  # 应用因果掩码
+        # a = self.causal_mask(a, s + 1)
         a_prob = self.A_softmax(a)
+
         h0 = self.A_mul_V(a_prob, V_T)  #  [b, h / dev_cnt, 1, d_h]
         assert h0.shape == [b, h // dev_cnt, 1, d_h]
         h0 = self.H_transpose(h0, [0, 2, 1, 3])  #  [b, 1, h / dev_cnt, d_h]
@@ -476,22 +495,28 @@ class TransformerBlockAutoRegressionTP(Operator):
         assert h0.shape == [b, 1, d // dev_cnt]
         h0 = self.H_matmul0(h0, self.W0)  #  [b, 1, d]
         assert h0.shape == [b, 1, d]
-        h0 = self.layer_norm0(h0)
+
+        # h0 = h0.add(x)
+
+        h0 = self.rmsnorm0(h0)
         assert h0.shape == [b, 1, d]
         if dev_cnt > 1:
             h0 = self.allreduce_mha(h0)
+
 
         # feed-forward network
         h1 = self.H_matmul1(h0, self.W1)  # [b, 1, 4 * d / dev_cnt]
         assert h1.shape == [b, 1, 4 * d // dev_cnt]
         
-        h1 = self.H_gelu(h1)
+   
         h1 = self.H_silu(h1)      
 
         h2 = self.H_matmul2(h1, self.W2)  #  [b, 1, d]
         assert h2.shape == [b, 1, d]
 
-        h2 = self.layer_norm1(h2)
+        # Residual connection
+        # h2 = h2.add(h0)
+
         h2 = self.rmsnorm1(h2)
         if dev_cnt > 1:
             h2 = self.allreduce_ffn(h2)
@@ -555,15 +580,16 @@ class TransformerBlockAutoRegressionTP(Operator):
             + device.compute_module.overhead.softmax
         )
         layernorm_latency = (
-            self.layer_norm0.roofline_model(device)
+            self.rmsnorm0.roofline_model(device)
             + device.compute_module.overhead.layernorm
         )
 
         normlization_total_latency = softmax_latency + layernorm_latency * 2
 
         # gelu
-        gelu_latency = (
-            self.H_gelu.roofline_model(device) + device.compute_module.overhead.gelu
+        silu_latency = (
+            self.H_silu.roofline_model(device) 
+            + device.compute_module.overhead.gelu
         )
 
         # allreduce
@@ -579,11 +605,11 @@ class TransformerBlockAutoRegressionTP(Operator):
         # print
         print("Roofline breakdown:")
         print(
-            f"{qkv_latency}\n{q_mul_k_latency}\n{a_mul_v_latency}\n{h_matmul0_latency}\n{h1_matmul1_latency}\n{h2_matmul2_latency}\n{softmax_latency}\n{layernorm_latency}\n{layernorm_latency}\n{gelu_latency}\n{allreduce_latency}\n{allreduce_latency}\n"
+            f"{qkv_latency}\n{q_mul_k_latency}\n{a_mul_v_latency}\n{h_matmul0_latency}\n{h1_matmul1_latency}\n{h2_matmul2_latency}\n{softmax_latency}\n{layernorm_latency}\n{layernorm_latency}\n{silu_latency}\n{allreduce_latency}\n{allreduce_latency}\n"
         )
         print("total:")
         print(
-            f"{matmul_total_latency}\n{normlization_total_latency}\n{gelu_latency}\n{allreduce_total_latency}\n"
+            f"{matmul_total_latency}\n{normlization_total_latency}\n{silu_latency}\n{allreduce_total_latency}\n"
         )
         self.roofline_latency = (
             matmul_total_latency
@@ -592,7 +618,7 @@ class TransformerBlockAutoRegressionTP(Operator):
             + allreduce_total_latency
         )
         # print(f'memory requirement: {self.memory_requirement/1e9*96}GB')
-        self.roofline_log = f"{qkv_latency}, {q_mul_k_latency}, {a_mul_v_latency}, {h_matmul0_latency}, {h1_matmul1_latency}, {h2_matmul2_latency}, {softmax_latency}, {layernorm_latency}, {layernorm_latency}, {gelu_latency}, {allreduce_latency}, {allreduce_latency}"
+        self.roofline_log = f"{qkv_latency}, {q_mul_k_latency}, {a_mul_v_latency}, {h_matmul0_latency}, {h1_matmul1_latency}, {h2_matmul2_latency}, {softmax_latency}, {layernorm_latency}, {layernorm_latency}, {silu_latency}, {allreduce_latency}, {allreduce_latency}"
         return self.roofline_latency
 
     def compile_and_simulate(self, system: System, compile_mode: str):
@@ -651,7 +677,7 @@ class TransformerBlockAutoRegressionTP(Operator):
             + pcb.compute_module.overhead.softmax
         )
         layernorm_latency = (
-            self.layer_norm0.compile_and_simulate(pcb, compile_mode)
+            self.rmsnorm0.compile_and_simulate(pcb, compile_mode)
             + pcb.compute_module.overhead.layernorm
         )
         rmsnorm_latency = (
@@ -662,10 +688,10 @@ class TransformerBlockAutoRegressionTP(Operator):
         normlization_total_latency = softmax_latency + layernorm_latency * 2
 
         # gelu
-        gelu_latency = (
-            self.H_gelu.compile_and_simulate(pcb, compile_mode)
-            + pcb.compute_module.overhead.gelu
-        )
+        # gelu_latency = (
+        #     self.H_gelu.compile_and_simulate(pcb, compile_mode)
+        #     + pcb.compute_module.overhead.gelu
+        # )
 
         # silu
         silu_latency = (
