@@ -3,6 +3,7 @@ from software_model.operators import (
     Reshape,
     Concat,
     Transpose,
+    Add,
 )
 from software_model.matmul import Matmul, BatchedMatmul
 from software_model.softmax import Softmax
@@ -422,6 +423,7 @@ class Llama2BlockAutoRegressionTP(Operator):
         self.H_transpose = Transpose(data_type)
         self.H_reshape = Reshape(data_type)
         self.H_matmul0 = Matmul(data_type)
+        self.add = Add(data_type)
         self.rmsnorm0 = RMSNorm(data_type)
         self.allreduce_mha = AllReduceMultiPCB(data_type)
         self.RoPE = RoPE(data_type)
@@ -496,7 +498,8 @@ class Llama2BlockAutoRegressionTP(Operator):
         h0 = self.H_matmul0(h0, self.W0)  #  [b, 1, d]
         assert h0.shape == [b, 1, d]
 
-        # h0 = h0.add(x)
+        h0 = self.add(h0, x)
+        assert h0.shape == [b, 1, d]
 
         h0 = self.rmsnorm0(h0)
         assert h0.shape == [b, 1, d]
@@ -515,7 +518,7 @@ class Llama2BlockAutoRegressionTP(Operator):
         assert h2.shape == [b, 1, d]
 
         # Residual connection
-        # h2 = h2.add(h0)
+        h2 = self.add(h2, h0)
 
         h2 = self.rmsnorm1(h2)
         if dev_cnt > 1:

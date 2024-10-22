@@ -3,6 +3,7 @@ from typing import List, Tuple, Union
 from hardware_model.device import Device
 from software_model.utils import Tensor, DataType
 
+import numpy as np
 
 class Operator:
     def __init__(
@@ -107,4 +108,38 @@ class Transpose(Operator):
 
         self.output_shape = [self.input_shape[i] for i in permute]
         output = Tensor(self.output_shape, self.data_type)
+        return output
+
+class Add(Operator):
+    def __init__(self, data_type: DataType):
+        super().__init__(0, 0, 0, 0, data_type)
+        self.input1_shape = None
+        self.input2_shape = None
+        self.output_shape = None
+
+    def vectorized_add(self, data1, data2):
+
+        return np.add(data1, data2)
+
+
+    def __call__(self, input1: Tensor, input2: Tensor) -> Tensor:
+        # 确保两个输入张量的维度相同
+        assert len(input1.shape) == len(input2.shape)
+        for i in range(len(input1.shape)):
+            assert input1.shape[i] == input2.shape[i]
+
+        self.input1_shape = input1.shape
+        self.input2_shape = input2.shape
+        self.output_shape = input1.shape
+
+        # 计算性能指标
+        self.flop_count = input1.size  # 每个元素一个加法操作
+        self.load_count = input1.size + input2.size  # 加载两个输入张量
+        self.store_count = input1.size  # 存储结果张量
+        self.io_count = self.load_count + self.store_count  # 总的IO操作
+        self.peak_memory_usage = (input1.size + input2.size ) * 2
+
+        # 创建输出张量
+        output = Tensor(self.output_shape, self.data_type)
+
         return output
