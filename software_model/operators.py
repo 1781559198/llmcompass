@@ -117,10 +117,6 @@ class Add(Operator):
         self.input2_shape = None
         self.output_shape = None
 
-    def vectorized_add(self, data1, data2):
-
-        return np.add(data1, data2)
-
 
     def __call__(self, input1: Tensor, input2: Tensor) -> Tensor:
         # 确保两个输入张量的维度相同

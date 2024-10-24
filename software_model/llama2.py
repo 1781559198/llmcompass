@@ -429,7 +429,6 @@ class Llama2BlockAutoRegressionTP(Operator):
         self.RoPE = RoPE(data_type)
         # # feed-forward network
         self.H_matmul1 = Matmul(data_type)
-        self.H_gelu = GeLU(data_type)
         self.H_silu = SiLU(data_type)
         self.H_matmul2 = Matmul(data_type)
         self.rmsnorm1 = RMSNorm(data_type)
@@ -519,7 +518,8 @@ class Llama2BlockAutoRegressionTP(Operator):
 
         # Residual connection
         h2 = self.add(h2, h0)
-
+        assert h2.shape == [b, 1, d]
+        
         h2 = self.rmsnorm1(h2)
         if dev_cnt > 1:
             h2 = self.allreduce_ffn(h2)
@@ -679,16 +679,12 @@ class Llama2BlockAutoRegressionTP(Operator):
             self.A_softmax.compile_and_simulate(pcb, compile_mode)
             + pcb.compute_module.overhead.softmax
         )
-        layernorm_latency = (
-            self.rmsnorm0.compile_and_simulate(pcb, compile_mode)
-            + pcb.compute_module.overhead.layernorm
-        )
         rmsnorm_latency = (
             self.rmsnorm1.compile_and_simulate(pcb, compile_mode)
             + pcb.compute_module.overhead.rmsnorm   # 自定义
         )
 
-        normlization_total_latency = softmax_latency + layernorm_latency * 2
+        normlization_total_latency = softmax_latency + rmsnorm_latency * 2
 
         # gelu
         # gelu_latency = (
@@ -728,7 +724,7 @@ class Llama2BlockAutoRegressionTP(Operator):
             + silu_latency
             + allreduce_total_latency
         )
-        self.simluate_log = f"{qkv_latency}, {q_mul_k_latency}, {a_mul_v_latency}, {h_matmul0_latency}, {h1_matmul1_latency}, {h2_matmul2_latency}, {softmax_latency}, {layernorm_latency}, {layernorm_latency}, {silu_latency}, {allreduce_latency}, {allreduce_latency}"
+        self.simluate_log = f"{qkv_latency}, {q_mul_k_latency}, {a_mul_v_latency}, {h_matmul0_latency}, {h1_matmul1_latency}, {h2_matmul2_latency}, {softmax_latency}, {rmsnorm_latency}, {rmsnorm_latency}, {silu_latency}, {allreduce_latency}, {allreduce_latency}"
         return self.latency
 
     def run_on_gpu(self):
