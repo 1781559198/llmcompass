@@ -10,7 +10,7 @@ import statistics
 import numpy as np
 
 
-class CausalMask(Operator):
+class aCausalMask(Operator):
     def __init__(self, data_type: DataType):
         super().__init__(0, 0, 0, 0, data_type)
         self.shape = None
@@ -261,8 +261,9 @@ class CausalMask(Operator):
         def simulate_l1_tile_io_cycle_count(
             self, M: int, N: int, data_type: DataType, pcb_module: Device
         ):
-            bandwidth_per_cycle = pcb_module.compute_module.l2_bandwidth_per_cycle
-            return ceil(M * N * data_type.word_size / bandwidth_per_cycle)
+            return ceil(
+                M * N * data_type.word_size 
+                / pcb_module.compute_module.l2_bandwidth_per_cycle)
 
         def simulate_l1_tile_compute_cycle_count(
             self, M: int, N: int, data_type: DataType, pcb_module: Device

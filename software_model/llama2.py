@@ -4,6 +4,7 @@ from software_model.operators import (
     Concat,
     Transpose,
     Add,
+    CausalMask,
 )
 from software_model.matmul import Matmul, BatchedMatmul
 from software_model.softmax import Softmax
@@ -12,7 +13,6 @@ from software_model.gelu import GeLU
 from software_model.silu import SiLU
 from software_model.rmsnorm import RMSNorm
 from software_model.rope import RoPE
-from software_model.casual_mask import CausalMask
 
 from software_model.utils import Tensor, DataType
 from software_model.communication_primitives import AllReduceMultiPCB
@@ -684,13 +684,7 @@ class Llama2BlockAutoRegressionTP(Operator):
             + pcb.compute_module.overhead.rmsnorm   # 自定义
         )
 
-        normlization_total_latency = softmax_latency + rmsnorm_latency * 2
-
-        # gelu
-        # gelu_latency = (
-        #     self.H_gelu.compile_and_simulate(pcb, compile_mode)
-        #     + pcb.compute_module.overhead.gelu
-        # )
+        normlization_total_latency = softmax_latency + rmsnorm_latency * 2 
 
         # silu
         silu_latency = (
@@ -724,7 +718,7 @@ class Llama2BlockAutoRegressionTP(Operator):
             + silu_latency
             + allreduce_total_latency
         )
-        self.simluate_log = f"{qkv_latency}, {q_mul_k_latency}, {a_mul_v_latency}, {h_matmul0_latency}, {h1_matmul1_latency}, {h2_matmul2_latency}, {softmax_latency}, {rmsnorm_latency}, {rmsnorm_latency}, {silu_latency}, {allreduce_latency}, {allreduce_latency}"
+        self.simluate_log = f"{qkv_latency}, {q_mul_k_latency}, {a_mul_v_latency}, {h_matmul0_latency}, {h1_matmul1_latency}, {h2_matmul2_latency}, {rope_latency}, {softmax_latency}, {rmsnorm_latency}, {rmsnorm_latency}, {silu_latency}, {allreduce_latency}, {allreduce_latency}"
         return self.latency
 
     def run_on_gpu(self):
