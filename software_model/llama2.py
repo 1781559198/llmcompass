@@ -5,6 +5,7 @@ from software_model.operators import (
     Transpose,
     Add,
     CausalMask,
+    ElementWiseMultiply,
 )
 from software_model.matmul import Matmul, BatchedMatmul
 from software_model.softmax import Softmax
@@ -20,6 +21,7 @@ from math import ceil
 from typing import List
 from hardware_model.system import System
 
+import torch
 
 class Llama2BlockInitComputationTP(Operator):
     def __init__(self, d_model, n_heads, device_count, data_type: DataType):
@@ -430,6 +432,7 @@ class Llama2BlockAutoRegressionTP(Operator):
         # # feed-forward network
         self.H_matmul1 = Matmul(data_type)
         self.H_silu = SiLU(data_type)
+        self.element_mul = ElementWiseMultiply(data_type)
         self.H_matmul2 = Matmul(data_type)
         self.rmsnorm1 = RMSNorm(data_type)
         self.rope = RoPE(data_type)
@@ -485,7 +488,7 @@ class Llama2BlockAutoRegressionTP(Operator):
         a = self.Q_mul_K(q_T, K_T)  # [b, h / dev_cnt, 1, s+1]
         assert a.shape == [b, h // dev_cnt, 1, s + 1]
         a = self.causal_mask(a)  # 应用因果掩码
-        # a = self.causal_mask(a, s + 1)
+        assert a.shape == [b, h // dev_cnt, 1, s + 1]
         a_prob = self.A_softmax(a)
 
         h0 = self.A_mul_V(a_prob, V_T)  #  [b, h / dev_cnt, 1, d_h]
@@ -510,21 +513,25 @@ class Llama2BlockAutoRegressionTP(Operator):
         h1 = self.H_matmul1(h0, self.W1)  # [b, 1, 4 * d / dev_cnt]
         assert h1.shape == [b, 1, 4 * d // dev_cnt]
         
-   
-        h1 = self.H_silu(h1)      
+        h2 = self.H_silu(h1)      
+        
+        h3 = self.H_matmul1(h0, self.W1)  # [b, 1, 4 * d / dev_cnt]
+        assert h3.shape == [b, 1, 4 * d // dev_cnt]
 
-        h2 = self.H_matmul2(h1, self.W2)  #  [b, 1, d]
-        assert h2.shape == [b, 1, d]
+        h4 = self.element_mul(h2, h3)  # [b, 1, 4 * d / dev_cnt]
+
+        h5 = self.H_matmul2(h4, self.W2)  #  [b, 1, d]
+        assert h5.shape == [b, 1, d]
 
         # Residual connection
-        h2 = self.add(h2, h0)
-        assert h2.shape == [b, 1, d]
+        h6 = self.add(h0, h5)
+        assert h6.shape == [b, 1, d]
         
-        h2 = self.rmsnorm1(h2)
+        h6 = self.rmsnorm1(h6)
         if dev_cnt > 1:
-            h2 = self.allreduce_ffn(h2)
+            h6 = self.allreduce_ffn(h6)
 
-        assert h2.shape == [b, 1, d]
+        assert h6.shape == [b, 1, d]
         self.memory_requirement = (
             self.Wq.size * self.Wq.data_type.word_size
             + self.Wk.size * self.Wk.data_type.word_size
@@ -535,7 +542,7 @@ class Llama2BlockAutoRegressionTP(Operator):
             + K_cache.size * K_cache.data_type.word_size
             + V_cache.size * V_cache.data_type.word_size
         )
-        return h2
+        return h6
 
     def roofline_model(self, system: System):
         device = system.device
@@ -617,7 +624,7 @@ class Llama2BlockAutoRegressionTP(Operator):
         self.roofline_latency = (
             matmul_total_latency
             + normlization_total_latency
-            + gelu_latency
+            + silu_latency
             + allreduce_total_latency
         )
         # print(f'memory requirement: {self.memory_requirement/1e9*96}GB')
@@ -718,7 +725,7 @@ class Llama2BlockAutoRegressionTP(Operator):
             + silu_latency
             + allreduce_total_latency
         )
-        self.simluate_log = f"{qkv_latency}, {q_mul_k_latency}, {a_mul_v_latency}, {h_matmul0_latency}, {h1_matmul1_latency}, {h2_matmul2_latency}, {rope_latency}, {softmax_latency}, {rmsnorm_latency}, {rmsnorm_latency}, {silu_latency}, {allreduce_latency}, {allreduce_latency}"
+        self.simluate_log = f"{qkv_latency}, {q_mul_k_latency}, {a_mul_v_latency}, {h_matmul0_latency}, {h1_matmul1_latency}, {h1_matmul1_latency}, {h2_matmul2_latency}, {rope_latency}, {softmax_latency}, {rmsnorm_latency}, {rmsnorm_latency}, {silu_latency}, {allreduce_latency}, {allreduce_latency}"
         return self.latency
 
     def run_on_gpu(self):

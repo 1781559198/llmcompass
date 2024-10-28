@@ -177,3 +177,33 @@ class CausalMask(Operator):
         # In a real implementation, you would apply the mask to the input tensor.
 
         return output
+
+
+class ElementWiseMultiply(Operator):
+    def __init__(self, data_type: DataType):
+        super().__init__(0, 0, 0, 0, data_type)
+        self.input1_shape = None
+        self.input2_shape = None
+        self.output_shape = None
+
+    def __call__(self, input1: Tensor, input2: Tensor) -> Tensor:
+        # Ensure both inputs have the same shape
+        assert input1.shape == input2.shape, "Input tensors must have the same shape for element-wise multiplication."
+        
+        self.input1_shape = input1.shape
+        self.input2_shape = input2.shape
+        self.output_shape = input1.shape  # The output shape is the same as the input shapes
+
+        # Compute the total number of elements
+        n = size(input1.shape)  # Assuming size() computes the total number of elements in the tensor
+
+        # Compute operation counts
+        self.flop_count = n  # One multiplication per element
+        self.load_count = 2 * n  # Need to load each element from both input tensors
+        self.store_count = n  # Store each result into the output tensor
+        self.io_count = self.load_count + self.store_count
+        self.peak_memory_usage = n * 3  # Both inputs and the output tensor in memory
+
+        # Create the output tensor
+        output = Tensor(self.output_shape, self.data_type)
+        return output

@@ -8,8 +8,6 @@ from software_model.matmul import Matmul, BatchedMatmul
 from software_model.softmax import Softmax
 from software_model.layernorm import LayerNorm
 from software_model.gelu import GeLU
-from software_model.silu import SiLU
-from software_model.rmsnorm import RMSNorm
 
 
 from software_model.utils import Tensor, DataType
@@ -21,19 +19,12 @@ from hardware_model.system import System
 
 class TransformerBlockInitComputationTP(Operator):
     def __init__(self, d_model, n_heads, device_count, data_type: DataType):
-        # d_model: 模型的隐藏层维度，也就是输入张量的特征维度
-        # n_heads: 注意力机制中的头数（多头注意力机制）
-        # device_count: 分布式计算中的设备数量，通常表示并行计算的设备数量
-        # data_type: 数据类型（DataType），用于定义张量的数据类型，如 float32 或 float16
-        super().__init__(0, 0, 0, 0, data_type)# 调用父类函数Operator
+        super().__init__(0, 0, 0, 0, data_type)
         self.d_model = d_model
         self.n_heads = n_heads
         self.device_count = device_count
         # parameters per device
         d = d_model
-        # 分别初始化了多头自注意力机制中的 查询（Query）、键（Key） 和 值（Value） 投影矩阵
-        # d：输入维度（即 d_model），表示模型的隐藏层维度。
-        # d // device_count：表示该设备上负责的权重部分。假设有 device_count 个设备，模型的权重被划分成 device_count 份，每个设备负责一部分
         self.Wq = Tensor([d, d // device_count], data_type)
         self.Wk = Tensor([d, d // device_count], data_type)
         self.Wv = Tensor([d, d // device_count], data_type)
@@ -41,7 +32,7 @@ class TransformerBlockInitComputationTP(Operator):
         self.W1 = Tensor([d, 4 * d // device_count], data_type)
         self.W2 = Tensor([4 * d // device_count, d], data_type)
         # operators per device
-        # multi-head attention
+        # # multi-head attention
         self.Q_proj = Matmul(data_type)
         self.K_proj = Matmul(data_type)
         self.V_proj = Matmul(data_type)
@@ -78,9 +69,6 @@ class TransformerBlockInitComputationTP(Operator):
         d_h = d // h
 
         # multi-head attention
-
-
-        # Matmul:Q_K_V：通过矩阵乘法将输入 X 投影为查询（Q）、键（K）、值（V）
         Q = self.Q_proj(X, self.Wq)  # [b, s, d / dev_cnt]
         assert Q.shape == [b, s, d // dev_cnt]
         K = self.K_proj(X, self.Wk)  # [b, s, d / dev_cnt]
@@ -88,49 +76,36 @@ class TransformerBlockInitComputationTP(Operator):
         Q = self.Q_reshape(Q, [b, s, h // dev_cnt, d_h])
         K = self.K_reshape(K, [b, s, h // dev_cnt, d_h])
         V = self.V_reshape(V, [b, s, h // dev_cnt, d_h])
-
         Q_T = self.Q_transpose(Q, [0, 2, 1, 3])  # [b, h / dev_cnt, s, d_h]
         assert Q_T.shape == [b, h // dev_cnt, s, d_h]
         K_T = self.K_transpose(K, [0, 2, 3, 1])  # [b, h / dev_cnt, d_h, s]
         assert K_T.shape == [b, h // dev_cnt, d_h, s]
         V_T = self.V_transpose(V, [0, 2, 1, 3])  # [b, h / dev_cnt, s, d_h]
         assert V_T.shape == [b, h // dev_cnt, s, d_h]
-        # Matmul:Q_mul_K：将查询矩阵 Q_T 和键矩阵 K_T 相乘，生成注意力权重
         A = self.Q_mul_K(Q_T, K_T)  # [b, h / dev_cnt, s, s]
         assert A.shape == [b, h // dev_cnt, s, s]
-        # Softmax：对注意力权重矩阵 A 应用 softmax，生成归一化的注意力权重
         A_prob = self.A_softmax(A)
-        # Matmul:A_mul_V：将归一化的注意力权重与值矩阵 V_T 相乘，生成注意力机制的输出
         H = self.A_mul_V(A_prob, V_T)  #  [b, h / dev_cnt, s, d_h]
         assert H.shape == [b, h // dev_cnt, s, d_h]
         H = self.H_transpose(H, [0, 2, 1, 3])  #  [b, s, h / dev_cnt, d_h]
         assert H.shape == [b, s, h // dev_cnt, d_h]
         H = self.H_reshape(H, [b, s, d // dev_cnt])
         assert H.shape == [b, s, d // dev_cnt]
-        # Matmul:Wo_proj：多头自注意力的输出投影，用于将多头注意力的输出重新投影到原始的隐藏层维度
         H0 = self.H_matmul0(H, self.W0)  #  [b, s, d]
         assert H0.shape == [b, s, d]
-        # LayerNorm - MHA：多头注意力机制后的层归一化操作
         H0 = self.layer_norm0(H0)
         assert H0.shape == [b, s, d]
         if dev_cnt > 1:
             H0 = self.allreduce_mha(H0)
 
-
         # feed-forward network
-
-        # Matmul:W1_proj：前馈神经网络的第一层，全连接层 W1 将输入的隐藏层维度扩展到 4 倍。对应代码中的 self.H_matmul1
         H1 = self.H_matmul1(H0, self.W1)  # [b, s, 4 * d / dev_cnt]
         assert H1.shape == [b, s, 4 * d // dev_cnt]
-        # GeLU 激活函数
         H1 = self.H_gelu(H1)
-        # Matmul:W2_proj: 前馈神经网络的第二层，全连接层 W2 将维度从 4 倍还原回原始维度。对应代码中的 self.H_matmul2
         H2 = self.H_matmul2(H1, self.W2)  #  [b, s, d]
         assert H2.shape == [b, s, d]
-        # LayerNorm - FFN：前馈神经网络后的层归一化操作
         H2 = self.layer_norm1(H2)
         if dev_cnt > 1:
-            # AllReduce FFN：如果有多个设备，代码中的 self.allreduce_ffn 会用于跨设备同步数据
             H2 = self.allreduce_ffn(H2)
 
         assert H2.shape == [b, s, d]
@@ -383,8 +358,8 @@ class TransformerBlockAutoRegressionTP(Operator):
         self.d_model = d_model
         self.n_heads = n_heads
         self.device_count = device_count
-        # parameters per device   计算类型大小
-        d = d_model# 模型维度
+        # parameters per device
+        d = d_model
         self.Wq = Tensor([d, d // device_count], data_type)
         self.Wk = Tensor([d, d // device_count], data_type)
         self.Wv = Tensor([d, d // device_count], data_type)
@@ -393,15 +368,6 @@ class TransformerBlockAutoRegressionTP(Operator):
         self.W2 = Tensor([4 * d // device_count, d], data_type)
         # operators per device
         # # multi-head attention
-
-        # matmul 用于矩阵乘法操作，通常在计算查询（Q）、键（K）、值（V）时使用
-        # reshape 用于调整张量的形状，以便后续的计算
-        # transpone 用于转置张量的维度，以便进行适当的矩阵乘法
-        # batchedmatmul 用于批量矩阵乘法，通常用于计算注意力权重等
-        # softmax 用于批量矩阵乘法，通常用于计算注意力权重等
-        # layernorm 用于层归一化，帮助模型收敛
-        # allreducemultipcb 用于层归一化，帮助模型收敛
-        # gelu 用于激活函数，常用于前馈神经网络中
         self.Q_proj = Matmul(data_type)
         self.K_proj = Matmul(data_type)
         self.V_proj = Matmul(data_type)
@@ -424,24 +390,22 @@ class TransformerBlockAutoRegressionTP(Operator):
         # # feed-forward network
         self.H_matmul1 = Matmul(data_type)
         self.H_gelu = GeLU(data_type)
-        self.H_silu = SiLU(data_type)
         self.H_matmul2 = Matmul(data_type)
         self.layer_norm1 = LayerNorm(data_type)
-        self.rmsnorm1 = RMSNorm(data_type)
         self.allreduce_ffn = AllReduceMultiPCB(data_type)
 
     def __call__(self, x: Tensor, seq_len: int) -> Tensor:
-        # b: batch size 批次大小
-        # s: sequence length 序列长度
-        # d: hidden dimension 隐藏维度
-        # d_h: dimension per head 
+        # b: batch size
+        # s: sequence length
+        # d: hidden dimension
+        # d_h: dimension per head
         b, _, d = x.shape
         assert d == self.d_model
         s = seq_len
-        h = self.n_heads# 多头注意力的头数
-        dev_cnt = self.device_count# 设备数量
-        d_h = d // h# 每个头的维度
-        
+        h = self.n_heads
+        dev_cnt = self.device_count
+        d_h = d // h
+
         # KV cache
         K_cache = Tensor([b, h // dev_cnt, d_h, s], self.data_type)
         V_cache = Tensor([b, h // dev_cnt, s, d_h], self.data_type)
@@ -449,9 +413,11 @@ class TransformerBlockAutoRegressionTP(Operator):
         # multi-head attention
         q = self.Q_proj(x, self.Wq)  # [b, 1, d / dev_cnt]
         assert q.shape == [b, 1, d // dev_cnt]
+        8, 1, 12288
         k = self.K_proj(x, self.Wk)  # [b, 1, d / dev_cnt]
         v = self.V_proj(x, self.Wv)  # [b, 1, d / dev_cnt]
         q = self.Q_reshape(q, [b, 1, h // dev_cnt, d_h])
+        8, 1, 96, 128
         k = self.K_reshape(k, [b, 1, h // dev_cnt, d_h])
         v = self.V_reshape(v, [b, 1, h // dev_cnt, d_h])
         q_T = self.Q_transpose(q, [0, 2, 1, 3])  # [b, h / dev_cnt, 1, d_h]
@@ -483,15 +449,10 @@ class TransformerBlockAutoRegressionTP(Operator):
         # feed-forward network
         h1 = self.H_matmul1(h0, self.W1)  # [b, 1, 4 * d / dev_cnt]
         assert h1.shape == [b, 1, 4 * d // dev_cnt]
-        
         h1 = self.H_gelu(h1)
-        h1 = self.H_silu(h1)      
-
         h2 = self.H_matmul2(h1, self.W2)  #  [b, 1, d]
         assert h2.shape == [b, 1, d]
-
         h2 = self.layer_norm1(h2)
-        h2 = self.rmsnorm1(h2)
         if dev_cnt > 1:
             h2 = self.allreduce_ffn(h2)
 
@@ -634,7 +595,7 @@ class TransformerBlockAutoRegressionTP(Operator):
             + h2_matmul2_latency
         )
 
-        # normalization   执行时间加硬件开销
+        # normalization
         softmax_latency = (
             self.A_softmax.compile_and_simulate(pcb, compile_mode)
             + pcb.compute_module.overhead.softmax
@@ -642,10 +603,6 @@ class TransformerBlockAutoRegressionTP(Operator):
         layernorm_latency = (
             self.layer_norm0.compile_and_simulate(pcb, compile_mode)
             + pcb.compute_module.overhead.layernorm
-        )
-        rmsnorm_latency = (
-            self.rmsnorm1.compile_and_simulate(pcb, compile_mode)
-            + pcb.compute_module.overhead.rmsnorm   # 自定义
         )
 
         normlization_total_latency = softmax_latency + layernorm_latency * 2
@@ -655,13 +612,6 @@ class TransformerBlockAutoRegressionTP(Operator):
             self.H_gelu.compile_and_simulate(pcb, compile_mode)
             + pcb.compute_module.overhead.gelu
         )
-
-        # silu
-        silu_latency = (
-            self.H_silu.compile_and_simulate(pcb, compile_mode)
-            + pcb.compute_module.overhead.silu # 自定义
-        )
-
 
         # allreduce
         if self.device_count > 1:
@@ -685,10 +635,10 @@ class TransformerBlockAutoRegressionTP(Operator):
         self.latency = (
             matmul_total_latency
             + normlization_total_latency
-            + silu_latency
+            + gelu_latency
             + allreduce_total_latency
         )
-        self.simluate_log = f"{qkv_latency}, {q_mul_k_latency}, {a_mul_v_latency}, {h_matmul0_latency}, {h1_matmul1_latency}, {h2_matmul2_latency}, {softmax_latency}, {layernorm_latency}, {layernorm_latency}, {silu_latency}, {allreduce_latency}, {allreduce_latency}"
+        self.simluate_log = f"{qkv_latency}, {q_mul_k_latency}, {a_mul_v_latency}, {h_matmul0_latency}, {h1_matmul1_latency}, {h2_matmul2_latency}, {softmax_latency}, {layernorm_latency}, {layernorm_latency}, {gelu_latency}, {allreduce_latency}, {allreduce_latency}"
         return self.latency
 
     def run_on_gpu(self):
