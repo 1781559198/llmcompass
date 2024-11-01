@@ -3,17 +3,15 @@ from software_model.operators import (
     Reshape,
     Concat,
     Transpose,
-    Add,
-    CausalMask,
-    ElementWiseMultiply,
 )
 from software_model.matmul import Matmul, BatchedMatmul
 from software_model.softmax import Softmax
-from software_model.layernorm import LayerNorm
-from software_model.gelu import GeLU
 from software_model.silu import SiLU
 from software_model.rmsnorm import RMSNorm
 from software_model.rope import RoPE
+from software_model.casual_mask import CausalMask
+from software_model.add import Add
+from software_model.element_wise_multiply import ElementWiseMultiply
 
 from software_model.utils import Tensor, DataType
 from software_model.communication_primitives import AllReduceMultiPCB
@@ -432,8 +430,9 @@ class Llama2BlockAutoRegressionTP(Operator):
         # # feed-forward network
         self.H_matmul1 = Matmul(data_type)
         self.H_silu = SiLU(data_type)
-        self.element_mul = ElementWiseMultiply(data_type)
+        self.element_wise_multiply = ElementWiseMultiply(data_type)
         self.H_matmul2 = Matmul(data_type)
+        self.H_matmul3 = Matmul(data_type)
         self.rmsnorm1 = RMSNorm(data_type)
         self.rope = RoPE(data_type)
         self.allreduce_ffn = AllReduceMultiPCB(data_type)
@@ -491,6 +490,7 @@ class Llama2BlockAutoRegressionTP(Operator):
         assert a.shape == [b, h // dev_cnt, 1, s + 1]
         a_prob = self.A_softmax(a)
 
+        # 多头注意力
         h0 = self.A_mul_V(a_prob, V_T)  #  [b, h / dev_cnt, 1, d_h]
         assert h0.shape == [b, h // dev_cnt, 1, d_h]
         h0 = self.H_transpose(h0, [0, 2, 1, 3])  #  [b, 1, h / dev_cnt, d_h]
@@ -510,17 +510,18 @@ class Llama2BlockAutoRegressionTP(Operator):
 
 
         # feed-forward network
+        # up
         h1 = self.H_matmul1(h0, self.W1)  # [b, 1, 4 * d / dev_cnt]
         assert h1.shape == [b, 1, 4 * d // dev_cnt]
         
-        h2 = self.H_silu(h1)      
-        
-        h3 = self.H_matmul1(h0, self.W1)  # [b, 1, 4 * d / dev_cnt]
-        assert h3.shape == [b, 1, 4 * d // dev_cnt]
+        # gate, SiLU   
+        h2 = self.H_matmul2(h0, self.W1)  # [b, 1, 4 * d / dev_cnt]
+        assert h2.shape == [b, 1, 4 * d // dev_cnt]
+        h3 = self.H_silu(h2)   
 
-        h4 = self.element_mul(h2, h3)  # [b, 1, 4 * d / dev_cnt]
+        h4 = self.element_wise_multiply(h1, h3)  # [b, 1, 4 * d / dev_cnt]
 
-        h5 = self.H_matmul2(h4, self.W2)  #  [b, 1, d]
+        h5 = self.H_matmul3(h4, self.W2)  #  [b, 1, d]
         assert h5.shape == [b, 1, d]
 
         # Residual connection
@@ -666,6 +667,10 @@ class Llama2BlockAutoRegressionTP(Operator):
             self.H_matmul2.compile_and_simulate(pcb, compile_mode)
             + pcb.compute_module.overhead.matmul
         )
+        casual_mask_latency = (
+            self.causal_mask.compile_and_simulate(pcb, compile_mode)
+            + pcb.compute_module.overhead.casual_mask
+        )
 
         matmul_total_latency = (
             qkv_latency
@@ -674,6 +679,7 @@ class Llama2BlockAutoRegressionTP(Operator):
             + h_matmul0_latency
             + h1_matmul1_latency
             + h2_matmul2_latency
+            + casual_mask_latency
         )
 
         rope_latency = (
@@ -690,15 +696,22 @@ class Llama2BlockAutoRegressionTP(Operator):
             self.rmsnorm1.compile_and_simulate(pcb, compile_mode)
             + pcb.compute_module.overhead.rmsnorm   # 自定义
         )
+        add_latency = (
+            self.add.compile_and_simulate(pcb, compile_mode)
+            + pcb.compute_module.overhead.add
+        )
 
-        normlization_total_latency = softmax_latency + rmsnorm_latency * 2 
+        normlization_total_latency = softmax_latency + rmsnorm_latency * 3 + add_latency * 3
 
         # silu
         silu_latency = (
             self.H_silu.compile_and_simulate(pcb, compile_mode)
             + pcb.compute_module.overhead.silu # 自定义
         )
-
+        element_wise_multiply_latency = (
+            self.element_wise_multiply.compile_and_simulate(pcb, compile_mode)
+            + pcb.compute_module.overhead.element_wise_multiply
+        )
 
         # allreduce
         if self.device_count > 1:
@@ -725,7 +738,7 @@ class Llama2BlockAutoRegressionTP(Operator):
             + silu_latency
             + allreduce_total_latency
         )
-        self.simluate_log = f"{qkv_latency}, {q_mul_k_latency}, {a_mul_v_latency}, {h_matmul0_latency}, {h1_matmul1_latency}, {h1_matmul1_latency}, {h2_matmul2_latency}, {rope_latency}, {softmax_latency}, {rmsnorm_latency}, {rmsnorm_latency}, {silu_latency}, {allreduce_latency}, {allreduce_latency}"
+        self.simluate_log = f"{qkv_latency}, {q_mul_k_latency}, {a_mul_v_latency}, {h_matmul0_latency}, {h1_matmul1_latency}, {h1_matmul1_latency}, {h2_matmul2_latency}, {casual_mask_latency},{rope_latency}, {softmax_latency}, {add_latency}, {add_latency}, {add_latency}, {rmsnorm_latency},{rmsnorm_latency}, {rmsnorm_latency}, {silu_latency}, {element_wise_multiply_latency}, {allreduce_latency}, {allreduce_latency}"
         return self.latency
 
     def run_on_gpu(self):
