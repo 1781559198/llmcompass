@@ -438,16 +438,16 @@ class Llama2BlockAutoRegressionTP(Operator):
         self.allreduce_ffn = AllReduceMultiPCB(data_type)
 
     def __call__(self, x: Tensor, seq_len: int) -> Tensor:
-        # b: batch size 批次大小
-        # s: sequence length 序列长度
+        # b: batch size 批次大小    8
+        # s: sequence length 序列长度 122888
         # d: hidden dimension 隐藏维度
         # d_h: dimension per head 
-        b, _, d = x.shape
-        assert d == self.d_model
+        b, _, d = x.shape 
+        assert d == self.d_model # 12288
         s = seq_len
-        h = self.n_heads# 多头注意力的头数
-        dev_cnt = self.device_count# 设备数量
-        d_h = d // h# 每个头的维度
+        h = self.n_heads# 多头注意力的头数 96
+        dev_cnt = self.device_count# 设备数量 1
+        d_h = d // h# 每个头的维度 128
         
         # KV cache
         K_cache = Tensor([b, h // dev_cnt, d_h, s], self.data_type)

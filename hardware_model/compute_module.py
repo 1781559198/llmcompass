@@ -18,13 +18,18 @@ class VectorUnit:
         self.vector_width = vector_width
         self.vector_count = vector_count
         self.flops_per_cycle = ceil(
-            total_vector_flops_per_cycle / vector_width / vector_count
+            total_vector_flops_per_cycle / vector_width / vector_count # 计算每个周期的flops
         )
         self.data_type = data_type
 
 
 vector_unit_dict = {
     "A100_fp16": VectorUnit(512, 2, 35, 32, 4),
+    # 512：每个周期的总 FLOPs。
+    # 2：数据类型的大小（2 字节，即 fp16）。
+    # 35：每次 exp 运算的 FLOPs。
+    # 32：向量寄存器宽度。
+    # 4：向量寄存器的数量（子通道数）。
     "TPUv3_fp32": VectorUnit(128 * 8, 4, 15, 128, 8, data_type_dict["fp32"]),
     "MI210_fp32": VectorUnit(128, 4, 18, 16, 4, data_type_dict["fp32"]),
     "TPUv3_new": VectorUnit(128 * 4, 4, 15, 128, 4, data_type_dict["fp32"]),
@@ -136,18 +141,18 @@ class ComputeModule:
         self.clock_freq = clock_freq
         self.l2_size = int(l2_size)  # Byte
         self.l2_bandwidth_per_cycle = l2_bandwidth_per_cycle  # Byte/clock
-        self.total_vector_flops_per_cycle = (
-            core.vector_unit.total_vector_flops_per_cycle * core_count
+        self.total_vector_flops_per_cycle = ( 
+            core.vector_unit.total_vector_flops_per_cycle * core_count # 总向量flops
         )
         self.total_vector_flops = self.total_vector_flops_per_cycle * clock_freq
-        self.total_systolic_array_flops = (
-            core_count
-            * core.systolic_array_count
-            * core.systolic_array.mac_per_cycle
+        self.total_systolic_array_flops = ( # 总矩阵乘法flops计算
+            core_count # 核心数量
+            * core.systolic_array_count # 每个核心中矩阵乘法单元
+            * core.systolic_array.mac_per_cycle # 每个核心中矩阵乘法单元
             * 2
-            * core.systolic_array.array_height
-            * core.systolic_array.array_width
-            * clock_freq
+            * core.systolic_array.array_height # Systolic Array 的维度，表示矩阵乘法的规模
+            * core.systolic_array.array_width 
+            * clock_freq # 时钟频率
         )
         self.overhead = overhead
 

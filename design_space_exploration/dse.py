@@ -34,11 +34,11 @@ def template_to_system(arch_specs):
     # vector unit
     vector_unit_specs = core_specs["vector_unit"]
     vector_unit = VectorUnit(
-        sublane_count
+        sublane_count # 子通道
         * vector_unit_specs["vector_width"]
-        * vector_unit_specs["flop_per_cycle"],
-        int(re.search(r"(\d+)", vector_unit_specs["data_type"]).group(1)) // 8,
-        35,
+        * vector_unit_specs["flop_per_cycle"], # 计算每个周期的总浮点运算数量（FLOPs），即 total_vector_flops_per_cycle
+        int(re.search(r"(\d+)", vector_unit_specs["data_type"]).group(1)) // 8, # 通过正则表达式从数据类型字符串中提取数据类型的位数，将其转换为字节数
+        35, # 指数运算需要的flops
         vector_unit_specs["vector_width"],
         sublane_count,
     )
@@ -69,10 +69,10 @@ def template_to_system(arch_specs):
     )
     # io module
     io_module = IOModule(
-        io_specs["memory_channel_active_count"]
-        * io_specs["pin_count_per_channel"]
-        * io_specs["bandwidth_per_pin_bit"]
-        // 8,
+        io_specs["memory_channel_active_count"] # 活跃的内存通道数量
+        * io_specs["pin_count_per_channel"] # 每个内存通道的引脚数量
+        * io_specs["bandwidth_per_pin_bit"] # 每个引脚每秒可以传输的比特数
+        // 8, # 字节转换
         1e-6,
     )
     # memory module
@@ -85,12 +85,12 @@ def template_to_system(arch_specs):
     interconnect_specs = arch_specs["interconnect"]
     link_specs = interconnect_specs["link"]
     link_module = LinkModule(
-        link_specs["bandwidth_per_direction_byte"],
-        link_specs["bandwidth_both_directions_byte"],
-        link_specs["latency_second"],
-        link_specs["flit_size_byte"],
-        link_specs["max_payload_size_byte"],
-        link_specs["header_size_byte"],
+        link_specs["bandwidth_per_direction_byte"], # 每个方向的通信带宽，以字节为单位
+        link_specs["bandwidth_both_directions_byte"], # 同时在两个方向上通信的总带宽（双向带宽）
+        link_specs["latency_second"], # 通信的延迟，以秒为单位
+        link_specs["flit_size_byte"], # 最小的传输单位（flit）的大小，以字节为单位
+        link_specs["max_payload_size_byte"], # 一次传输的最大有效载荷大小
+        link_specs["header_size_byte"], # 数据包的头部大小，以字节为单位
     )
     interconnect_module = InterConnectModule(
         arch_specs["device_count"],
