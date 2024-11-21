@@ -216,6 +216,8 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
                                         "HBM2e",
                                         "DDR5",
                                         "PCIe5",
+                                        "SRAM",
+                                        "3D_DRAM"
                                         # "GDDR6X"
                                     ]:
                                         arch_specs['device']['memory_protocol']=memory_protocol
@@ -237,6 +239,14 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
                                             channel_count_list = [64, 96, 128]
                                             pin_count_per_channel=1
                                             bandwidth_per_pin_bit=32e9
+                                        elif memory_protocol == "yizhu_SRAM":
+                                            channel_count_list = [16, 24, 32]
+                                            pin_count_per_channel=512
+                                            bandwidth_per_pin_bit=1e9
+                                        elif memory_protocol == "yizhu_3D_DRAM":
+                                            channel_count_list = [16, 24, 32]
+                                            pin_count_per_channel=512
+                                            bandwidth_per_pin_bit=1e9
                                         # elif memory_protocol == "GDDR6X":
                                         #     # 84 GB/s per channel, 2 GB
                                         #     channel_count_list= memo

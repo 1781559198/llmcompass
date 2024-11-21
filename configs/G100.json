@@ -3,56 +3,72 @@
     "device_count": 4,
     "interconnect": {
         "link": {
-            "name": "NVLink3",
-            "bandwidth_per_direction_byte": 25e9,
+            "name": "PCIe",
+            "bandwidth_per_direction_byte": 32e9,
             "bandwidth_both_directions_byte": 50e9,
             "latency_second": 8.92e-6,
             "flit_size_byte": 16,
             "header_size_byte": 16,
             "max_payload_size_byte": 256
         },
-        "link_count_per_device": 12,
+        "link_count_per_device": 4,
         "topology": "FC"
     },
     "device": {
         "frequency_Hz": 1410e6,
         "compute_chiplet_count": 1,
         "compute_chiplet": {
+            "bpc_count": 8,
+            "cluster_count": 4,
             "TPE_count": 32,
             "RVV_count": 128,
             "process_node": "7nm",
             "core"{
                 "TPE": {
-                    "tpe_width": ,
-                    "tpe_height": ,
+                    "tpe_width": 16,
+                    "tpe_height": 16,
                     "tpe_data_type":["fp8" ,"fp16" , "fp32" , "int8" , "int16" , "int32"],
                     "mac_per_cycle": 1
                 },
                 "RVV": {
-                    "rvv_width": ,
-                    "rvv_height": ,
+                    "rvv_width": 16,
+                    "rvv_height": 16,
                     "tpe_data_type":["fp8" ,"fp16" , "fp32" , "int8" , "int16" , "int32"],
                     "mac_per_cycle": 1
                 },
             },
+            "memory_protocol": ["yizhu_SRAM","yizhu_3D_DRAM"], /* 内存协议 */
+            "_memory_protocol_list": [
+                "HBM2e",
+                "DDR4",
+                "DDR5",
+                "PCIe4",
+                "PCIe5",
+                "yizhu_SRAM",
+                "yizhu_3D_DRAM"
+            ], 
             "SRAM_KB": {
                 "rows_per_bank": 8192,
                 "bank_port_bit": 512,
                 "bank_count": 64,
                 "total_capacity_MB": 32,
-                "bank_capacity": 512,
                 "clock_rate_Hz": 1e9,
                 "bandwidth_TB_per_s": 4,
                 "address_interleave": "between banks"
             },
+            "3D_DRAM":{
+                
+            },
             "io": {
                 "global_buffer_MB": 2048,  // 3D-DRAM 总容量 per CU = 540 MB
-                "global_buffer_bandwidth_per_cycle_byte": 512 * (1e9) / (8),  / 512位 * 1GHz / 8 = 每周期字节数
+                "global_buffer_bandwidth_per_cycle_byte": 64, //512 * (1e9) / (8),  512位 * 1GHz / 8 = 每周期字节数
                 "memory_channel_physical_count": 4,  // 4 个bank
                 "pin_count_per_channel": 512,  // bank port = 512 bits
                 "bandwidth_per_pin_bit": 1e9  // Clock frequency最高1 GHz
             },
-            "memory": {
+
+
+            "memory": { //delete
                 "total_capacity_MB": 2048,  // LPDDR4X 2GB
                 "bank_density_MB": 512,  // 总容量/banks总数
                 "bank_count": 4,  // 每层4个banks
@@ -66,7 +82,7 @@
                     "1_layer": "4 banks within CU",
                     "2_layer": "8 banks within CU",
                     "4_layer": "8 banks within every 2 layers"
-                },
+                }
              },
 
 
@@ -107,30 +123,6 @@
             "DDR5",
             "PCIe4",
             "PCIe5"
-        ],
-      
-        "SRAM": {
-            "configuration_1": {
-                "rows_per_bank": 8192,
-                "bank_port_bit": 512,
-                "bank_density_KB": 512,
-                "total_banks": 64,
-                "total_capacity_MB": 32,
-                "clock_rate_Hz": 1e9,
-                "bandwidth_TB_per_s": 4,
-                "address_interleave": "between banks"
-            }
-        },
-        "CU_GMEM": {
-            "configuration_1": {
-                "dram_density_per_cu_MB": 540,
-                "dram_bandwidth_per_cu_GB_per_s": 288,
-                "memory_clock_Hz": 400e6,
-                "banks_per_cu": 5,
-                "bank_density_MB": 108,
-                "bank_port_bit": 1152,
-                "address_interleave": "between banks within CU"
-            }
-        }
-    }
+        ]
+    }  
 }
