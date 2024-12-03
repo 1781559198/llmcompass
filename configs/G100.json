@@ -23,11 +23,11 @@
             "process_node": "7nm",
             "core": {
                 "sublane_count": 4,
+                "single_tpe": true,
                 "systolic_array": {
-                    "array_width": 16,
-                    "comment": "we support array_width of 64, but we only have 1 tpe, thus 64/4=16",
-                    "array_height": 32,
-                    "data_type": "fp16",
+                    "array_width": 64,
+                    "array_height": 64,
+                    "data_type": "fp8",
                     "mac_per_cycle": 1
                 },
                 "vector_unit": {
