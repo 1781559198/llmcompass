@@ -1236,8 +1236,8 @@ class Matmul(Operator):
 
                 # if one output tile in this batch shares input/output with another output tile in the previous batch, assign them to the same core to avoid data movement
                 # note that of the three input matrix mk, kn, mn, at most one of them can be the same if we change m,n,k
-                current_batch_M_K_read_count = np.sum(
-                    (current_batch_Read_M_K * (~previous_batch_Read_M_K))
+                current_batch_M_K_read_count = np.sum(# ~按位取反
+                    (current_batch_Read_M_K * (~previous_batch_Read_M_K))# 得到当前批次需要读取但前一批次没有读取的位置
                     * M_K_tile_size
                 )
                 current_batch_K_N_read_count = np.sum(
