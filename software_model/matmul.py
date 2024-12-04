@@ -1136,7 +1136,7 @@ class Matmul(Operator):
             )
             M_K_tile_size[:M_l1_t, :K_l1_t] = l1_tile_M * l1_tile_K# 一个tile的大小
             if M_remain > 0:
-                M_K_tile_size[-1, :K_l1_t] = M_remain * l1_tile_K
+                M_K_tile_size[-1, :K_l1_t] = M_remain * l1_tile_K# 每个完整快的大小
             if K_remain > 0:
                 M_K_tile_size[:M_l1_t, -1] = l1_tile_M * K_remain
             if M_remain > 0 and K_remain > 0:
@@ -1229,7 +1229,7 @@ class Matmul(Operator):
                             * temp_l1_tile.N
                             / chiplet_module.compute_module.core.vector_unit.total_vector_flops_per_cycle
                         )
-                    current_batch_compute_cycle_count = max(
+                    current_batch_compute_cycle_count = max(# 当前批次极端最慢的tile的
                         current_batch_compute_cycle_count,
                         temp_l1_tile_compute_cycle_count,
                     )
