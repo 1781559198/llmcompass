@@ -3,23 +3,19 @@ from typing import List, Tuple
 from hardware_model.device import Device
 from software_model.operators import Operator
 from software_model.utils import Tensor, DataType
-from math import ceil, log2, log
+from math import ceil, log2
 import time
 import statistics
 import numpy as np
 import torch
 
-# 解决没有triton没有的错误
-import torch._dynamo
-torch._dynamo.config.suppress_errors = True
-
 
 @torch.compile
-def layernorm_gpu(input: torch.Tensor) -> torch.Tensor:
-    return torch.layer_norm(input, [input.shape[-1]])
+def rmsnorm_gpu(input: torch.Tensor) -> torch.Tensor:
+    return input / torch.sqrt(torch.mean(input ** 2, dim=-1, keepdim=True) + 1e-5)
 
 
-class LayerNorm(Operator):
+class RMSNorm(Operator):
     def __init__(self, data_type: DataType):
         super().__init__(0, 0, 0, 0, data_type)
         self.shape = None
@@ -36,7 +32,7 @@ class LayerNorm(Operator):
 
     def roofline_model(self, pcb_module: Device):
         self.io_count = self.M * self.N * self.data_type.word_size * 2
-        self.flop_count = self.M * self.N * 7
+        self.flop_count = self.M * self.N * 5  # RMSNorm 通常需要较少的 FLOPs
         self.roofline_latency = max(
             self.io_count
             / min(
@@ -49,7 +45,7 @@ class LayerNorm(Operator):
         return self.roofline_latency
 
     def print_latency(self):
-        print(f"{self.shape}, {self.latency_on_gpu*1e6}us")
+        print(f"{self.shape}, {self.latency_on_gpu * 1e6}us")
 
     class ComputationalGraph:
         def __init__(self, M: int, N: int, data_type: DataType):
@@ -58,7 +54,7 @@ class LayerNorm(Operator):
             self.data_type = data_type
 
     class Mapping:
-        def __init__(# 表示和管理内存映射配置
+        def __init__(  # 表示和管理内存映射配置
             self,
             l2_tile_M: int,
             l2_tile_N: int,
@@ -143,16 +139,17 @@ class LayerNorm(Operator):
         M_l2_t = M // l2_tile_M
         M_remain = M % l2_tile_M
 
-        l2_tiles = np.empty([ceil(M / l2_tile_M)], dtype=self.L2TileSimulator)
+        l2_tiles = np.empty([ceil(M / l2_tile_M)], dtype=object)
 
         if M_l2_t != 0:
-            l2_tiles[:M_l2_t] = self.L2TileSimulator(
-                l2_tile_M,
-                N,
-                data_type,
-                mapping,
-                pcb_module,
-            )
+            for i in range(M_l2_t):
+                l2_tiles[i] = self.L2TileSimulator(
+                    l2_tile_M,
+                    N,
+                    data_type,
+                    mapping,
+                    pcb_module,
+                )
         if M_remain != 0:
             l2_tiles[-1] = self.L2TileSimulator(
                 M_remain,
@@ -176,7 +173,7 @@ class LayerNorm(Operator):
             M: int,
             N: int,
             data_type: DataType,
-            mapping: "LayerNorm.Mapping",
+            mapping: "RMSNorm.Mapping",
             pcb_module: Device,
         ):
             self.M = M
@@ -200,7 +197,7 @@ class LayerNorm(Operator):
                 * data_type.word_size
                 / (
                     chiplet_module.io_module.bandwidth
-                    / chiplet_module.compute_module.clock_freq #硬件时间频率
+                    / chiplet_module.compute_module.clock_freq  # 硬件时钟频率
                 )
             )
 
@@ -209,13 +206,13 @@ class LayerNorm(Operator):
             M: int,
             N: int,
             data_type: DataType,
-            mapping: "LayerNorm.Mapping",
+            mapping: "RMSNorm.Mapping",
             pcb_module: Device,
         ):
             l1_tile_M = mapping.l1_tile_M
             l1_tile_N = mapping.l1_tile_N
 
-            l1_tile = LayerNorm.L1TileSimulator(
+            l1_tile = RMSNorm.L1TileSimulator(
                 l1_tile_M,
                 l1_tile_N,
                 data_type,
@@ -224,7 +221,7 @@ class LayerNorm(Operator):
             )
             l1_tile_count = ceil(M / l1_tile_M) * ceil(N / l1_tile_N)
             l1_tile_cycle_count = (
-                l1_tile.read_cycle_count * 3
+                l1_tile.read_cycle_count
                 + l1_tile.write_cycle_count
                 + l1_tile.compute_cycle_count
             )
@@ -242,7 +239,7 @@ class LayerNorm(Operator):
             M: int,
             N: int,
             data_type: DataType,
-            mapping: "LayerNorm.Mapping",
+            mapping: "RMSNorm.Mapping",
             pcb_module: Device,
         ):
             self.M = M
@@ -285,52 +282,41 @@ class LayerNorm(Operator):
             M: int,
             N: int,
             data_type: DataType,
-            mapping: "LayerNorm.Mapping",
+            mapping: "RMSNorm.Mapping",
             pcb_module: Device,
         ):
-            # 计算向量大小
-            M_per_vector_count = ceil(
+            # 这边就是区分行和列
+            M_per_vector_count = ceil(# 矩阵在行方向上如何分配给多个向量单元。硬件中有多个向量单元一起并行工作，因此每个向量单元需要处理一定的行数
                 M / pcb_module.compute_module.core.vector_unit.vector_count
             )
             N_per_vector_count = N
-            M_per_vector_lane = M_per_vector_count
+            M_per_vector_lane = M_per_vector_count# 矩阵在列方向上如何进一步划分给向量单元处理。由于每个向量单元的宽度有限，
+                                                  #它们一次只能处理一部分列。这部分列称为向量宽度，需要根据硬件的能力进行划分
             N_per_vector_lane = ceil(
                 N_per_vector_count
                 / pcb_module.compute_module.core.vector_unit.vector_width
             )
 
-            # each lane computes it own mean  均值计算
+            # 每个 lane 计算自己的 RMS
+            # RMSNorm: Calculate the sum of squares (平方和)
             total_cycle_count = ceil(
                 N_per_vector_lane
                 * M_per_vector_lane
                 / pcb_module.compute_module.core.vector_unit.flops_per_cycle
             )
-            # the whole vector reduce to one mean  规约操作
+            # 规约操作（平方和）
             total_cycle_count += log2(
                 pcb_module.compute_module.core.vector_unit.vector_width
             )
-            # each lane computes it own variance  方差计算
+            # 标准化输出
             total_cycle_count += (
                 ceil(
                     N_per_vector_lane
                     * M_per_vector_lane
                     / pcb_module.compute_module.core.vector_unit.flops_per_cycle
                 )
-                * 2# 平方
+                * 2  # 除法和乘法
             )
-            # the whole vector reduce to one variance  规约操作
-            total_cycle_count += log2(
-                pcb_module.compute_module.core.vector_unit.vector_width
-            )
-            # calculate normalized output  标准化输出
-            total_cycle_count += (
-                ceil(
-                    N_per_vector_lane
-                    * M_per_vector_lane
-                    / pcb_module.compute_module.core.vector_unit.flops_per_cycle
-                )
-                * 4
-            )  # division is heavy
 
             return total_cycle_count
 
@@ -342,14 +328,14 @@ class LayerNorm(Operator):
         input = torch.randn(self.shape, dtype=torch.float16, device="cuda")
         latencies = []
 
-        # warmup
+        # 预热
         for _ in range(3):
-            _ = layernorm_gpu(input)
+            _ = rmsnorm_gpu(input)
 
             torch.cuda.synchronize()
         for _ in range(self.iterations):
             start = time.time()
-            output = layernorm_gpu(input)
+            output = rmsnorm_gpu(input)
             torch.cuda.synchronize()
             end = time.time()
             assert output.shape == input.shape
@@ -367,7 +353,7 @@ class LayerNorm(Operator):
         a = torch.randn(1, 1, 1, device="cuda")
         for _ in range(50):
             start = time.time()
-            c = layernorm_gpu(a)
+            c = rmsnorm_gpu(a)
             torch.cuda.synchronize()
             end = time.time()
             latencies.append(end - start)

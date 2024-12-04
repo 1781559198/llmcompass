@@ -3,6 +3,7 @@ from typing import List, Tuple, Union
 from hardware_model.device import Device
 from software_model.utils import Tensor, DataType
 
+import numpy as np
 
 class Operator:
     def __init__(
