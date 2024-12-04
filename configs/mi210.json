@@ -29,7 +29,7 @@
                     "mac_per_cycle": 1
                 },
                 "vector_unit": {
-                    "vector_width": 16,
+                    "vector_width": 1024,
                     "flop_per_cycle": 2,
                     "data_type": "fp32",
                     "int32_count": 16,

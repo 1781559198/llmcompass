@@ -46,19 +46,7 @@
                 "PCIe5",
                 "yizhu_SRAM",
                 "yizhu_3D_DRAM"
-            ], 
-            "SRAM_KB": {
-                "rows_per_bank": 8192,
-                "bank_port_bit": 512,
-                "bank_count": 64,
-                "total_capacity_MB": 32,
-                "clock_rate_Hz": 1e9,
-                "bandwidth_TB_per_s": 4,
-                "address_interleave": "between banks"
-            },
-            "3D_DRAM":{
-                
-            },
+            ],  
             "io": {
                 "global_buffer_MB": 2048,  // 3D-DRAM 总容量 per CU = 540 MB
                 "global_buffer_bandwidth_per_cycle_byte": 64, //512 * (1e9) / (8),  512位 * 1GHz / 8 = 每周期字节数
@@ -70,9 +58,6 @@
 
             "memory": { //delete
                 "total_capacity_MB": 2048,  // LPDDR4X 2GB
-                "bank_density_MB": 512,  // 总容量/banks总数
-                "bank_count": 4,  // 每层4个banks
-                "layers": 4,  // 4层配置
                 "clock_MHz": {
                     "min": 800,
                     "max": 1000

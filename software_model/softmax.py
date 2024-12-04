@@ -18,8 +18,8 @@ class Softmax(Operator):
     def __call__(self, input: Tensor) -> Tensor:
         assert self.data_type == input.data_type
         self.shape = input.shape
-        self.M = size(input.shape[:-1])
-        self.N = input.shape[-1]
+        self.M = size(input.shape[:-1])# 最后一维之前的维度的乘积
+        self.N = input.shape[-1]# 最后一维的大小
         self.computational_graph = self.ComputationalGraph(
             self.M, self.N, self.data_type
         )
@@ -30,8 +30,8 @@ class Softmax(Operator):
 
     class ComputationalGraph:
         def __init__(self, M: int, N: int, data_type: DataType):
-            self.M = M
-            self.N = N
+            self.M = M# 最后一维之前的维度的乘积
+            self.N = N# 最后一维的大小
             self.data_type = data_type
 
     class Mapping:
@@ -67,21 +67,21 @@ class Softmax(Operator):
         self.computational_graph.data_type = pcb_module.compute_module.core.vector_unit.data_type
         min_cycle_count = float("inf")
         best_mapping = None
-        M = self.computational_graph.M
-        N = self.computational_graph.N
+        M = self.computational_graph.M# 最后一维之前的维度的乘积
+        N = self.computational_graph.N# 最后一维的大小
         data_type = self.computational_graph.data_type
         l2_tile_N = N
-        l2_tile_M = (
+        l2_tile_M = (# global_buffer_size//(l2_tile_N*data_type.word_size)每行的数据大小
             pcb_module.compute_module.l2_size // (l2_tile_N * data_type.word_size)
         )
-        l2_tile_M = min(l2_tile_M, M)
+        l2_tile_M = min(l2_tile_M, M)# 确保不超出硬件的限制
         is_l2_double_buffering = False
         for l1_N_tiling_factor in [1, 2, 4, 8, 16, 32]:
-            l1_tile_N = ceil(l2_tile_N / l1_N_tiling_factor)
+            l1_tile_N = ceil(l2_tile_N / l1_N_tiling_factor)# 每个l1_tile的列数并且向上取整
             for l1_tile_M in [1, 2, 4, 8, 16, 32, 64, 128, 256]:
                 for is_l1_double_buffering in [True, False]:
                     if is_l1_double_buffering:
-                        if (
+                        if (# 确保分块的大小小于SRAM的大小
                             l1_tile_M * l1_tile_N * data_type.word_size
                             > pcb_module.compute_module.core.SRAM_size // 2
                         ):
@@ -92,7 +92,7 @@ class Softmax(Operator):
                             > pcb_module.compute_module.core.SRAM_size
                         ):
                             continue
-                    mapping = self.Mapping(
+                    mapping = self.Mapping(# 记录映射信息
                         l2_tile_M,
                         l2_tile_N,
                         is_l2_double_buffering,
@@ -110,7 +110,7 @@ class Softmax(Operator):
         self.best_cycle_count = min_cycle_count
         self.best_latency = min_cycle_count / pcb_module.compute_module.clock_freq
         self.latency = self.best_latency
-        # self.best_mapping.display()
+        self.best_mapping.display()
         return self.latency
 
     def simulate(
@@ -124,7 +124,7 @@ class Softmax(Operator):
         data_type = computational_graph.data_type
         l2_tile_M = mapping.l2_tile_M
 
-        if mapping.is_l2_double_buffering:
+        if mapping.is_l2_double_buffering:# 检查
             assert (
                 l2_tile_M * N * data_type.word_size * 2
                 <= pcb_module.compute_module.l2_size
@@ -137,20 +137,20 @@ class Softmax(Operator):
         M_l2_t = M // l2_tile_M
         M_remain = M % l2_tile_M
 
-        l2_tiles = np.empty([ceil(M / l2_tile_M)], dtype=self.L2TileSimulator)
+        l2_tiles = np.empty([ceil(M / l2_tile_M)], dtype=self.L2TileSimulator)# (shape, dtype)
 
         if M_l2_t != 0:
             l2_tiles[:M_l2_t] = self.L2TileSimulator(
-                l2_tile_M,
-                N,
+                l2_tile_M,# 每个l2_tile的行数，compile_and_simulate那里遍历的结果
+                N,# 每个l2_tile的列数
                 data_type,
                 mapping,
                 pcb_module,
             )
         if M_remain != 0:
             l2_tiles[-1] = self.L2TileSimulator(
-                M_remain,
-                N,
+                M_remain,# 最后一个l2_tile的行数
+                N,# 最后一个l2_tile的列数
                 data_type,
                 mapping,
                 pcb_module,
@@ -158,7 +158,7 @@ class Softmax(Operator):
 
         total_cycle_count = 0
         l2_tile_count = ceil(M / l2_tile_M)
-        for m in range(l2_tile_count):
+        for m in range(l2_tile_count):# 计算处理整个矩阵所需的总时钟周期数
             total_cycle_count += l2_tiles[m].read_cycle_count
             total_cycle_count += l2_tiles[m].compute_cycle_count
             total_cycle_count += l2_tiles[m].write_cycle_count
@@ -192,9 +192,9 @@ class Softmax(Operator):
                 M
                 * N
                 * data_type.word_size
-                / (
-                    chiplet_module.io_module.bandwidth
-                    / chiplet_module.compute_module.clock_freq
+                / (# 一个时钟内可以传输的字节数
+                    chiplet_module.io_module.bandwidth# I/O模块的总带宽
+                    / chiplet_module.compute_module.clock_freq# 计算模块的时钟频率
                 )
             )
 
@@ -222,11 +222,11 @@ class Softmax(Operator):
                 + l1_tile.write_cycle_count
                 + l1_tile.compute_cycle_count
             )
-            total_cycle_count = (
-                ceil(l1_tile_count / pcb_module.compute_module.core_count) + 1
+            total_cycle_count = (# l1的分块数/硬件核心数
+                ceil(l1_tile_count / pcb_module.compute_module.core_count) + 1# l1总分块数/core +1是增加了一次同步操作？
             ) * (
-                l1_tile_cycle_count
-                + log2(ceil(N / l1_tile_N)) * l1_tile.reduction_cycle_count
+                l1_tile_cycle_count# l1的基础执行次数
+                + log2(ceil(N / l1_tile_N)) * l1_tile.reduction_cycle_count# 规约操作的执行次数
             )
             return total_cycle_count
 
@@ -254,12 +254,13 @@ class Softmax(Operator):
             self.write_cycle_count = self.simulate_l1_tile_io_cycle_count(
                 M, N, data_type, pcb_module
             )
-            self.reduction_cycle_count = (
-                M
+            self.reduction_cycle_count = (# 规约操作的周期数
+                M# 规约操作的浮点运算时钟周期数
                 * N
                 * (self.flops_per_exp + 2)
                 / pcb_module.compute_module.core.vector_unit.total_vector_flops_per_cycle
-                + M
+                + 
+                M# 数据传输需要的周期数（规约操作需要传递数据）
                 * N
                 * data_type.word_size
                 * 2
@@ -286,7 +287,7 @@ class Softmax(Operator):
         ):
             # online softmax
             total_flop_count = M * N * (self.flops_per_exp * 3 + 7)
-            return ceil(
+            return ceil(# 返回周期数
                 total_flop_count
                 / pcb_module.compute_module.core.vector_unit.total_vector_flops_per_cycle
             )
