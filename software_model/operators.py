@@ -23,7 +23,7 @@ class Operator:
         self.peak_memory_usage = peak_memory_usage
         self.data_type = data_type
         self.gpu_device = gpu_device
-        self.verbose = verbose
+        self.verbose = verbose# 是否打印详细信息
         self.log = ""
         self.comment = ""
         # simulation results

@@ -27,7 +27,7 @@ def read_architecture_template(file_path):
 
 def template_to_system(arch_specs):
     device_specs = arch_specs["device"]
-    compute_chiplet_specs = device_specs["compute_chiplet"]
+    compute_chiplet_specs = device_specs["compute_chiplet"]# 芯片组
     io_specs = device_specs["io"]
     core_specs = compute_chiplet_specs["core"]
     sublane_count = core_specs["sublane_count"]

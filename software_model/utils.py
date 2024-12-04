@@ -14,6 +14,6 @@ class Tensor:
         self, shape: List, data_type=data_type_dict["fp16"]
     ) -> None:
         self.shape = shape
-        self.size = size(shape)
+        self.size = size(shape)# 张量的数大小
         self.data_type = data_type
         

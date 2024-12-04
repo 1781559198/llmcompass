@@ -28,7 +28,7 @@ class BatchedMatmul(Operator):
         self.input1_shape = input1.shape
         self.input2_shape = input2.shape
         assert size(self.input1_shape[:-2]) == size(self.input2_shape[:-2])
-        self.bs = size(self.input1_shape[:-2])
+        self.bs = size(self.input1_shape[:-2])# 最后两个维度之外的所有维度
         self.M = self.input1_shape[-2]
         self.K = self.input1_shape[-1]
         assert self.input2_shape[-2] == self.K
@@ -260,7 +260,7 @@ class Matmul(Operator):
             )
 
     @staticmethod
-    def find_permutations(n):
+    def find_permutations(n):# 找到一个三元组
         permutations = set()
 
         for i in range(1, n + 1):
@@ -286,6 +286,7 @@ class Matmul(Operator):
             compile_mode == "heuristic-GPU"
             or compile_mode == "heuristic-our-throughput"
         ):
+            print(11111111111111111)
             working_set_size = M * K + N * K + M * N
             total_io_count = working_set_size * self.data_type.word_size
             io_latency = total_io_count / pcb_module.io_module.bandwidth
@@ -503,7 +504,8 @@ class Matmul(Operator):
                                 best_mapping = mapping
         elif compile_mode == "heuristic-GPU":
             i = 0
-            for l2_tile_M in [64, 128, 256, 512, 1024, 2048]:
+            print(22222222222222222)
+            for l2_tile_M in [64, 128, 256, 512, 1024, 2048]:# 因子选择
                 for l2_tile_N in [l2_tile_M // 2, l2_tile_M, l2_tile_M * 2]:
                     if K <= 12288:
                         l2_K_tiling_factor_list = [1, 2, 4, 8]
@@ -519,7 +521,7 @@ class Matmul(Operator):
                             self.computational_graph.K / l2_K_tiling_factor
                         )
                         l2_tile_K = 2 ** floor(log2(l2_tile_K))
-                        working_set_size = (
+                        working_set_size = (# 计算工作tile大小
                             l2_tile_N * l2_tile_K
                             + l2_tile_M * l2_tile_K
                             + l2_tile_M * l2_tile_N
@@ -539,7 +541,7 @@ class Matmul(Operator):
                             is_l2_double_buffering = True
                         else:
                             is_l2_double_buffering = False
-
+                        # L1
                         for l1_tile_M in [32, 64, 128, 256]:
                             if l1_tile_M > min(l2_tile_M, l2_tile_N):
                                 continue
@@ -550,7 +552,7 @@ class Matmul(Operator):
                                     l1_tile_M * l1_tile_N
                                     + l1_tile_N * l1_tile_K
                                     + l1_tile_M * l1_tile_K
-                                    > pcb_module.compute_module.core.SRAM_size
+                                    > pcb_module.compute_module.core.SRAM_size# local buffer
                                     // self.data_type.word_size
                                     // 2
                                 ):
@@ -731,8 +733,8 @@ class Matmul(Operator):
         else:
             raise ValueError(f"compile_mode {compile_mode} not supported")
         self.best_mapping = best_mapping
-        # if self.best_mapping is not None:
-        #     self.best_mapping.display()
+        if self.best_mapping is not None:
+             self.best_mapping.display()
         self.best_cycle_count = min_cycle_count
         self.best_latency = min_cycle_count / pcb_module.compute_module.clock_freq
         self.latency = self.best_latency
@@ -760,7 +762,7 @@ class Matmul(Operator):
                     "util_rate",
                 ],
             )
-            self.look_up_table.drop_duplicates(
+            self.look_up_table.drop_duplicates(# 删除重复的行
                 inplace=True,
                 subset=["M", "N", "K", "ArrayHeight", "ArrayWidth", "Dataflow"],
             )
@@ -807,13 +809,13 @@ class Matmul(Operator):
         K_remain = K % l2_tile_K
 
         l2_tiles = np.empty(
-            [ceil(M / l2_tile_M), ceil(N / l2_tile_N), ceil(K / l2_tile_K)],
+            [ceil(M / l2_tile_M), ceil(N / l2_tile_N), ceil(K / l2_tile_K)],# 数组的形状，每个维度需要的数量
             dtype=self.L2TileSimulator,
         )
         # print('-'*20)
         # print(l2_tiles.shape)
         if M_l2_t * N_l2_t * K_l2_t != 0:
-            l2_tiles[:M_l2_t, :N_l2_t, :K_l2_t] = self.L2TileSimulator(
+            l2_tiles[:M_l2_t, :N_l2_t, :K_l2_t] = self.L2TileSimulator(# 都可以被整除的部分
                 l2_tile_M,
                 l2_tile_N,
                 l2_tile_K,
@@ -823,7 +825,7 @@ class Matmul(Operator):
                 self.look_up_table,
             )
         if M_remain != 0:
-            l2_tiles[-1, :N_l2_t, :K_l2_t] = self.L2TileSimulator(
+            l2_tiles[-1, :N_l2_t, :K_l2_t] = self.L2TileSimulator(# M剩余的部分
                 M_remain,
                 l2_tile_N,
                 l2_tile_K,
@@ -833,7 +835,7 @@ class Matmul(Operator):
                 self.look_up_table,
             )
         if N_remain != 0:
-            l2_tiles[:M_l2_t, -1, :K_l2_t] = self.L2TileSimulator(
+            l2_tiles[:M_l2_t, -1, :K_l2_t] = self.L2TileSimulator(# N剩余的部分
                 l2_tile_M,
                 N_remain,
                 l2_tile_K,
@@ -843,7 +845,7 @@ class Matmul(Operator):
                 self.look_up_table,
             )
         if K_remain != 0:
-            l2_tiles[:M_l2_t, :N_l2_t, -1] = self.L2TileSimulator(
+            l2_tiles[:M_l2_t, :N_l2_t, -1] = self.L2TileSimulator(# K剩余的部分
                 l2_tile_M,
                 l2_tile_N,
                 K_remain,
@@ -853,7 +855,7 @@ class Matmul(Operator):
                 self.look_up_table,
             )
         if M_remain * N_remain != 0:
-            l2_tiles[-1, -1, :K_l2_t] = self.L2TileSimulator(
+            l2_tiles[-1, -1, :K_l2_t] = self.L2TileSimulator(# M,N剩余的部分
                 M_remain,
                 N_remain,
                 l2_tile_K,
@@ -863,7 +865,7 @@ class Matmul(Operator):
                 self.look_up_table,
             )
         if M_remain * K_remain != 0:
-            l2_tiles[-1, :N_l2_t, -1] = self.L2TileSimulator(
+            l2_tiles[-1, :N_l2_t, -1] = self.L2TileSimulator(# M,K剩余的部分
                 M_remain,
                 l2_tile_N,
                 K_remain,
@@ -873,7 +875,7 @@ class Matmul(Operator):
                 self.look_up_table,
             )
         if N_remain * K_remain != 0:
-            l2_tiles[:M_l2_t, -1, -1] = self.L2TileSimulator(
+            l2_tiles[:M_l2_t, -1, -1] = self.L2TileSimulator(# N,K剩余的部分
                 l2_tile_M,
                 N_remain,
                 K_remain,
@@ -883,7 +885,7 @@ class Matmul(Operator):
                 self.look_up_table,
             )
         if M_remain * N_remain * K_remain != 0:
-            l2_tiles[-1, -1, -1] = self.L2TileSimulator(
+            l2_tiles[-1, -1, -1] = self.L2TileSimulator(# M,N,K剩余的部分
                 M_remain,
                 N_remain,
                 K_remain,
@@ -908,29 +910,32 @@ class Matmul(Operator):
             ceil(K / l2_tile_K),
             mapping.l2_loop_order,
         ):
-            if m == 0 and n == 0 and k == 0:
+            if m == 0 and n == 0 and k == 0:# 跳过第一个块
                 continue
 
             l2_tile = l2_tiles[m, n, k]
             previous_l2_tile = l2_tiles[previous_m, previous_n, previous_k]
 
+            # 这里是为了不同 tile 的计算之间存在数据依赖性，某些方向的 tile 可能会重复使用上一方向的部分数据
             # current tile read latency
-            if m == previous_m and k == previous_k:
+            if m == previous_m and k == previous_k:# 当前的tile的m和k与前一个tile相同，仅加载k * n 的数据
                 current_tile_read_cycle_count = l2_tile.K_N_io_cycle_count
-            elif n == previous_n and k == previous_k:
+            elif n == previous_n and k == previous_k:# 当前的tile的n和k与前一个tile相同，仅加载m * k 的数据
                 current_tile_read_cycle_count = l2_tile.M_K_io_cycle_count
-            else:
+            else:# 否则同时加载m * k, k * n 的数据
                 current_tile_read_cycle_count = (
                     l2_tile.M_K_io_cycle_count + l2_tile.K_N_io_cycle_count
                 )
-            if k > 0 and not (m == previous_m and n == previous_n):
+            if k > 0 and not (m == previous_m and n == previous_n):# 如果k发生了变化，还得加载m * n 的结果
                 current_tile_read_cycle_count += l2_tile.M_N_io_cycle_count
+
             # previous tile compute latency
             previous_tile_compute_cycle_count = previous_l2_tile.compute_cycle_count
-            if k > 0:
+            if k > 0:# k方向的归约，所有子模块结果的计算累加
                 previous_tile_compute_cycle_count += (
                     previous_l2_tile.K_reduction_cycle_count
                 )
+
             # previous tile write latency
             if m == previous_m and n == previous_n:
                 previous_tile_write_cycle_count = 0
@@ -940,7 +945,8 @@ class Matmul(Operator):
             # read current tile, compute previous tile, write previous tile
             if mapping.is_l2_double_buffering:  # pipelined
                 total_cycle_count += (
-                    max(
+                    max(# 双缓冲的时候，数据加载（current_tile_read_cycle_count）和前一个 tile 的计算（previous_tile_compute_cycle_count）
+                        # 是并行进行的，但这两个操作的执行时间可能不同，取最大值
                         current_tile_read_cycle_count, previous_tile_compute_cycle_count
                     )
                     + previous_tile_write_cycle_count
@@ -984,13 +990,13 @@ class Matmul(Operator):
             self.M = M
             self.N = N
             self.K = K
-            self.K_reduction_cycle_count = ceil(
-                M * N / pcb_module.compute_module.total_vector_flops_per_cycle
-            ) + 2 * ceil(
+            self.K_reduction_cycle_count = ceil(# 跟vector unit有关
+                M * N / pcb_module.compute_module.total_vector_flops_per_cycle# 一个周期可以执行的浮点次数运算，
+            ) + 2 * ceil(# 读入和写出
                 M
                 * N
                 * data_type.word_size
-                / pcb_module.compute_module.l2_bandwidth_per_cycle
+                / pcb_module.compute_module.l2_bandwidth_per_cycle# global_buffer_bandwidth_per_cycle_byte
             )
             self.K_reduction_io_count = 2 * M * N * data_type.word_size
             self.M_K_io_cycle_count = self.simulate_l2_tile_io_cycle_count(
@@ -1029,11 +1035,11 @@ class Matmul(Operator):
             chiplet_module: Device,
             look_up_table: pd.DataFrame,
         ) -> int:
-            l1_tile_M = mapping.l1_tile_M
+            l1_tile_M = mapping.l1_tile_M# 维度的大小，维度
             l1_tile_N = mapping.l1_tile_N
             l1_tile_K = mapping.l1_tile_K
 
-            M_l1_t = M // l1_tile_M
+            M_l1_t = M // l1_tile_M# 能分多少个tile，个数
             N_l1_t = N // l1_tile_N
             K_l1_t = K // l1_tile_K
             M_remain = M % l1_tile_M
@@ -1125,12 +1131,12 @@ class Matmul(Operator):
                     look_up_table,
                 )
 
-            M_K_tile_size = np.zeros(
+            M_K_tile_size = np.zeros(# 计算每个块的大小
                 [ceil(M / l1_tile_M), ceil(K / l1_tile_K)], dtype=int
             )
-            M_K_tile_size[:M_l1_t, :K_l1_t] = l1_tile_M * l1_tile_K
+            M_K_tile_size[:M_l1_t, :K_l1_t] = l1_tile_M * l1_tile_K# 一个tile的大小
             if M_remain > 0:
-                M_K_tile_size[-1, :K_l1_t] = M_remain * l1_tile_K
+                M_K_tile_size[-1, :K_l1_t] = M_remain * l1_tile_K# 每个完整快的大小
             if K_remain > 0:
                 M_K_tile_size[:M_l1_t, -1] = l1_tile_M * K_remain
             if M_remain > 0 and K_remain > 0:
@@ -1159,6 +1165,7 @@ class Matmul(Operator):
                 M_N_tile_size[-1, -1] = M_remain * N_remain
 
             total_cycle_count = 0
+            # 记录前一个tile的信息
             previous_batch_Read_M_K = np.zeros(
                 [ceil(M / l1_tile_M), ceil(K / l1_tile_K)], dtype=bool
             )
@@ -1180,13 +1187,13 @@ class Matmul(Operator):
                 mapping.l1_loop_order,
             ):
                 active_l1_tile_list.append((m, n, k, l1_tiles[m, n, k]))
-                if (
+                if (# 检验是否是最后一个块
                     m == ceil(M / l1_tile_M) - 1
                     and n == ceil(N / l1_tile_N) - 1
                     and k == ceil(K / l1_tile_K) - 1
                 ):
                     pass
-                elif (
+                elif (# 如果没有满就继续等待
                     len(active_l1_tile_list) < chiplet_module.compute_module.core_count
                 ):
                     continue
@@ -1194,6 +1201,7 @@ class Matmul(Operator):
                 assert (
                     len(active_l1_tile_list) <= chiplet_module.compute_module.core_count
                 )
+                # 记录当前批次
                 current_batch_Read_M_K = np.zeros(
                     [ceil(M / l1_tile_M), ceil(K / l1_tile_K)], dtype=bool
                 )
@@ -1207,7 +1215,7 @@ class Matmul(Operator):
                     [ceil(M / l1_tile_M), ceil(N / l1_tile_N)], dtype=bool
                 )
 
-                current_batch_compute_cycle_count = 0
+                current_batch_compute_cycle_count = 0# ？
                 for i in range(len(active_l1_tile_list)):
                     temp_m, temp_n, temp_k, temp_l1_tile = active_l1_tile_list[i]
                     current_batch_Read_M_K[temp_m, temp_k] = 1
@@ -1221,15 +1229,15 @@ class Matmul(Operator):
                             * temp_l1_tile.N
                             / chiplet_module.compute_module.core.vector_unit.total_vector_flops_per_cycle
                         )
-                    current_batch_compute_cycle_count = max(
+                    current_batch_compute_cycle_count = max(# 当前批次极端最慢的tile的
                         current_batch_compute_cycle_count,
                         temp_l1_tile_compute_cycle_count,
                     )
 
                 # if one output tile in this batch shares input/output with another output tile in the previous batch, assign them to the same core to avoid data movement
                 # note that of the three input matrix mk, kn, mn, at most one of them can be the same if we change m,n,k
-                current_batch_M_K_read_count = np.sum(
-                    (current_batch_Read_M_K * (~previous_batch_Read_M_K))
+                current_batch_M_K_read_count = np.sum(# ~按位取反
+                    (current_batch_Read_M_K * (~previous_batch_Read_M_K))# 得到当前批次需要读取但前一批次没有读取的位置
                     * M_K_tile_size
                 )
                 current_batch_K_N_read_count = np.sum(
