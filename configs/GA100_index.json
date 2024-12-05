@@ -71,3 +71,6 @@
         }
     }
 }
+
+
+# 一个core里面只有一个tpe，但是有4个cu，所以通过single_tpe来判断是否有乘sublane_count

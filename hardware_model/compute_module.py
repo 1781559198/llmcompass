@@ -68,6 +68,8 @@ class Core:
         systolic_array: SystolicArray,
         systolic_array_count,
         SRAM_size,
+        single_tpe,
+        sublane_count,  # 添加这个参数
     ):
         self.vector_unit = vector_unit
         self.systolic_array = systolic_array
@@ -75,29 +77,35 @@ class Core:
         self.SRAM_size = SRAM_size  # Byte
         # assert(vector_unit.word_size==systolic_array.word_size)
         self.vector_word_size = vector_unit.word_size
+        self.single_tpe = single_tpe
+        self.sublane_count = sublane_count  
 
 
 core_dict = {
     "SM_A100_fp16": Core(
-        vector_unit_dict["A100_fp16"], systolic_array_dict["A100_fp16"], 4, 192 * 1024
+        vector_unit_dict["A100_fp16"], systolic_array_dict["A100_fp16"], 4, 192 * 1024, True, 4
     ),
     "SM_A100_int8": Core(
-        vector_unit_dict["A100_fp16"], systolic_array_dict["A100_int8"], 4, 192 * 1024
+        vector_unit_dict["A100_fp16"], systolic_array_dict["A100_int8"], 4, 192 * 1024, True, 4
     ),
     "Core_TPUv3_bf16": Core(
         vector_unit_dict["TPUv3_fp32"],
         systolic_array_dict["TPUv3_bf16"],
         2,
         16 * 1024 * 1024,
+        True,
+        4
     ),
     "CU_MI210_fp16": Core(
-        vector_unit_dict["MI210_fp32"], systolic_array_dict["MI210_fp16"], 4, 128 * 1024
+        vector_unit_dict["MI210_fp32"], systolic_array_dict["MI210_fp16"], 4, 128 * 1024, True, 4
     ),
     "Core_TPUv3_new": Core(
         vector_unit_dict["TPUv3_new"],
         systolic_array_dict["TPUv3_new"],
         1,
         8 * 1024 * 1024,
+        True,
+        4
     ),
 }
 # compute_tile_dict={'SM_A100_int8':ComputeTile(512, 4096, 192*1024*8,3.41, 'TSMC N7', 128*8),'SM_A100_fp16':ComputeTile(512, 2048, 192*1024*8,3.41, 'TSMC N7', 128),}

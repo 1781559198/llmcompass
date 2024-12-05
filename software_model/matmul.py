@@ -278,6 +278,12 @@ class Matmul(Operator):
         compile_mode: str = "exhaustive",
     ):
         min_cycle_count = 2**63 - 1
+        if pcb_module.compute_module.core.single_tpe:
+            # print("single_point")
+            pcb_module.compute_module.core.systolic_array_count = (
+                pcb_module.compute_module.core.systolic_array_count 
+                // pcb_module.compute_module.core.sublane_count
+            )
         best_mapping = None
         M = self.computational_graph.M
         N = self.computational_graph.N
@@ -1274,7 +1280,7 @@ class Matmul(Operator):
                 )
 
                 total_cycle_count += (
-                    max(
+                    max(# 取读取和计算的最大值
                         current_batch_read_cycle_count,
                         previous_batch_compute_cycle_count,
                     )
@@ -1290,7 +1296,7 @@ class Matmul(Operator):
                 active_l1_tile_list = []
 
             # last batch's compute and write
-            total_cycle_count += previous_batch_compute_cycle_count + ceil(
+            total_cycle_count += previous_batch_compute_cycle_count + ceil(# 上一批次的计算和这一批次的写入
                 np.sum(previous_batch_Write_M_N * M_N_tile_size)
                 * data_type.word_size
                 / chiplet_module.compute_module.l2_bandwidth_per_cycle
@@ -1353,7 +1359,8 @@ class Matmul(Operator):
                     chiplet_module.compute_module.core.systolic_array.mac_per_cycle,
                     mapping.dataflow,
                 )
-                + (K_tiling_factor - 1)
+                + 
+                (K_tiling_factor - 1)# 累加操作
                 * M
                 * N
                 / chiplet_module.compute_module.core.vector_unit.total_vector_flops_per_cycle
@@ -1376,7 +1383,7 @@ class Matmul(Operator):
         assert M * N * K * array_height * array_width * mac_per_clock != 0
         if M >= array_height and N >= array_width:
             if (
-                M * N * K / array_height / array_width / max(array_height, array_width)
+                M * N * K / array_height / array_width / max(array_height, array_width)# 得到最小周期数
                 >= 128
             ):
                 return ceil(

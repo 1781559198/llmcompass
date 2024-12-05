@@ -57,6 +57,8 @@ def template_to_system(arch_specs):
         systolic_array,
         sublane_count,
         core_specs["SRAM_KB"] * 1024,
+        core_specs["single_tpe"],
+        core_specs["sublane_count"],  
     )
     # compute module
     compute_module = ComputeModule(
@@ -292,5 +294,5 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
 if __name__ == "__main__":
     # test_template_to_system()
     find_cheapest_design(12288, 96, 96, 8, 2048, 5, 1024, 0.1)
-    
-    
+
+

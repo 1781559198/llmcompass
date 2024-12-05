@@ -21,62 +21,10 @@
             "physical_core_count": 8,
             "core_count": 32,
             "process_node": "7nm",
-            "core"{
-                "TPE": {
-                    "tpe_width": 16,
-                    "tpe_height": 16,
-                    "tpe_data_type":["fp8" ,"fp16" , "fp32" , "int8" , "int16" , "int32"],
-                    "mac_per_cycle": 1
-                },
-                "RVV": {
-                    "rvv_width": 16,
-                    "rvv_height": 16,
-                    "tpe_data_type":["fp8" ,"fp16" , "fp32" , "int8" , "int16" , "int32"],
-                    "mac_per_cycle": 1
-                },
-            },
-            "memory_protocol": ["yizhu_SRAM","yizhu_3D_DRAM"], /* 内存协议 */
-            "_memory_protocol_list": [
-                "HBM2e",
-                "DDR4",
-                "DDR5",
-                "PCIe4",
-                "PCIe5",
-                "yizhu_SRAM",
-                "yizhu_3D_DRAM"
-            ],  
-            "io": {
-                "global_buffer_MB": 2048,  // 3D-DRAM 总容量 per CU = 540 MB
-                "global_buffer_bandwidth_per_cycle_byte": 64, //512 * (1e9) / (8),  512位 * 1GHz / 8 = 每周期字节数
-                "memory_channel_physical_count": 4,  // 4 个bank
-                "pin_count_per_channel": 512,  // bank port = 512 bits
-                "bandwidth_per_pin_bit": 1e9  // Clock frequency最高1 GHz
-            },
-
-
-            "memory": { //delete
-                "total_capacity_MB": 2048,  // LPDDR4X 2GB
-                "clock_MHz": {
-                    "min": 800,
-                    "max": 1000
-                },
-                "type": "LPDDR4X",
-                "interleave": {
-                    "1_layer": "4 banks within CU",
-                    "2_layer": "8 banks within CU",
-                    "4_layer": "8 banks within every 2 layers"
-                }
-             },
-
-
-
-
-
-
             "core": {
                 "sublane_count": 4,
                 "single_tpe": true,
-                "systolic_array": {
+                "systolic_array": { 
                     "array_width": 64,
                     "array_height": 64,
                     "data_type": "fp8",
@@ -97,7 +45,7 @@
                     "register_bitwidth":32,
                     "num_rdwr_ports":4
                 },
-                "SRAM_KB": 256
+                "SRAM_KB": 128
             }
         },
         "memory_protocol": "PCIe5",
