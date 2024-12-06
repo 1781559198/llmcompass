@@ -60,7 +60,6 @@ systolic_array_dict = {
     "TPUv3_new": SystolicArray(128, 128, 1, 2, 4),
 }
 
-
 class Core:
     def __init__(
         self,
@@ -68,8 +67,8 @@ class Core:
         systolic_array: SystolicArray,
         systolic_array_count,
         SRAM_size,
-        single_tpe,
-        sublane_count,  # 添加这个参数
+        single_tpe: bool = False,    # 添加默认参数
+        sublane_count: int = 1,      # 添加默认参数
     ):
         self.vector_unit = vector_unit
         self.systolic_array = systolic_array
@@ -78,39 +77,36 @@ class Core:
         # assert(vector_unit.word_size==systolic_array.word_size)
         self.vector_word_size = vector_unit.word_size
         self.single_tpe = single_tpe
-        self.sublane_count = sublane_count  
+        self.sublane_count = sublane_count 
 
 
 core_dict = {
     "SM_A100_fp16": Core(
-        vector_unit_dict["A100_fp16"], systolic_array_dict["A100_fp16"], 4, 192 * 1024, True, 4
+        vector_unit_dict["A100_fp16"], systolic_array_dict["A100_fp16"], 4, 192 * 1024
     ),
     "SM_A100_int8": Core(
-        vector_unit_dict["A100_fp16"], systolic_array_dict["A100_int8"], 4, 192 * 1024, True, 4
+        vector_unit_dict["A100_fp16"], systolic_array_dict["A100_int8"], 4, 192 * 1024
     ),
     "Core_TPUv3_bf16": Core(
         vector_unit_dict["TPUv3_fp32"],
         systolic_array_dict["TPUv3_bf16"],
         2,
-        16 * 1024 * 1024,
-        True,
-        4
+        16 * 1024 * 1024
     ),
     "CU_MI210_fp16": Core(
-        vector_unit_dict["MI210_fp32"], systolic_array_dict["MI210_fp16"], 4, 128 * 1024, True, 4
+        vector_unit_dict["MI210_fp32"], systolic_array_dict["MI210_fp16"], 4, 128 * 1024
     ),
     "Core_TPUv3_new": Core(
         vector_unit_dict["TPUv3_new"],
         systolic_array_dict["TPUv3_new"],
         1,
-        8 * 1024 * 1024,
-        True,
-        4
+        8 * 1024 * 1024
     ),
 }
 # compute_tile_dict={'SM_A100_int8':ComputeTile(512, 4096, 192*1024*8,3.41, 'TSMC N7', 128*8),'SM_A100_fp16':ComputeTile(512, 2048, 192*1024*8,3.41, 'TSMC N7', 128),}
 # flops: https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html#gpu-arch__fig2
 # area: https://pbs.twimg.com/media/FOT_-NJWUAARrtB?format=jpg&name=large
+
 
 
 class Overhead:
@@ -147,7 +143,7 @@ class ComputeModule:
         self.core = core
         self.core_count = core_count
         self.clock_freq = clock_freq
-        self.l2_size = int(l2_size)  # Byte
+        self.l2_size = int(l2_size)  # global buffer
         self.l2_bandwidth_per_cycle = l2_bandwidth_per_cycle  # Byte/clock
         self.total_vector_flops_per_cycle = ( 
             core.vector_unit.total_vector_flops_per_cycle * core_count # 总向量flops

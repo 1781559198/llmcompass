@@ -52,13 +52,16 @@ def template_to_system(arch_specs):
         int(re.search(r"(\d+)", systolic_array_specs["data_type"]).group(1)) // 8,
     )
     # core
+    is_g100 = True if core_specs has single_tpe else False
+    if (core_specs not has "single_tpe"):
+        core_specs["single_tpe"] = False
     core = Core(
         vector_unit,
         systolic_array,
         sublane_count,
         core_specs["SRAM_KB"] * 1024,
         core_specs["single_tpe"],
-        core_specs["sublane_count"],  # 添加这个参数
+        core_specs["sublane_count"],  
     )
     # compute module
     compute_module = ComputeModule(
@@ -77,6 +80,8 @@ def template_to_system(arch_specs):
         // 8, # 字节转换
         1e-6,
     )
+    io_3dram_module = IOModule(
+        io-3dram
     # memory module
     memory_module = MemoryModule(
         device_specs["memory"]["total_capacity_GB"] * 1024 * 1024 * 1024

@@ -546,7 +546,10 @@ class Llama2BlockAutoRegressionTP(Operator):
         return h6
 
     def roofline_model(self, system: System):
-        device = system.device
+        if system.device.is_yizhu_g100:
+            device = system.yizhu_Device
+        else:
+            device = system.device
         interconnect = system.interconnect
 
         qkv_latency = 3 * (

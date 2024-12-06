@@ -13,7 +13,6 @@ import os
 from scalesim.scale_sim import scalesim
 import copy
 
-
 class BatchedMatmul(Operator):
     def __init__(self, data_type: DataType):
         super().__init__(0, 0, 0, 0, data_type)
@@ -278,8 +277,8 @@ class Matmul(Operator):
         compile_mode: str = "exhaustive",
     ):
         min_cycle_count = 2**63 - 1
-        if pcb_module.compute_module.core.single_tpe:
-            # print("single_point")
+        if pcb_module.is_yizhu_g100 and pcb_module.compute_module.core.single_tpe:
+            print("single_point")
             pcb_module.compute_module.core.systolic_array_count = (
                 pcb_module.compute_module.core.systolic_array_count 
                 // pcb_module.compute_module.core.sublane_count
@@ -325,7 +324,7 @@ class Matmul(Operator):
                         )
                         if (
                             working_set_size
-                            > pcb_module.compute_module.l2_size
+                            > pcb_module.compute_module.l2_size# global buffer
                             // self.data_type.word_size
                         ):
                             continue
@@ -534,7 +533,7 @@ class Matmul(Operator):
                         )
                         if (
                             working_set_size
-                            > pcb_module.compute_module.l2_size
+                            > pcb_module.compute_module.l2_size# global buffer
                             // self.data_type.word_size
                         ):
                             continue
@@ -799,7 +798,7 @@ class Matmul(Operator):
         if mapping.is_l2_double_buffering:
             assert (
                 l2_tile_M * l2_tile_N + l2_tile_N * l2_tile_K + l2_tile_M * l2_tile_K
-                <= pcb_module.compute_module.l2_size // self.data_type.word_size // 2
+                <= pcb_module.compute_module.l2_size // self.data_type.word_size // 2 # global buffer
             )
         else:
             assert (
@@ -922,7 +921,7 @@ class Matmul(Operator):
             l2_tile = l2_tiles[m, n, k]
             previous_l2_tile = l2_tiles[previous_m, previous_n, previous_k]
 
-            # 这里是为了不同 tile 的计算之间存在数据依赖性，某些方向的 tile 可能会重复使用上一方向的部分数据
+            # 这里是为了不同 tile 的计算之间存在数据依赖性，某些方向的 tile 可能会重复使���上一方向的部分数据
             # current tile read latency
             if m == previous_m and k == previous_k:# 当前的tile的m和k与前一个tile相同，仅加载k * n 的数据
                 current_tile_read_cycle_count = l2_tile.K_N_io_cycle_count
@@ -997,7 +996,7 @@ class Matmul(Operator):
             self.N = N
             self.K = K
             self.K_reduction_cycle_count = ceil(# 跟vector unit有关
-                M * N / pcb_module.compute_module.total_vector_flops_per_cycle# 一个周期可以执行的浮点次数运算，
+                M * N / pcb_module.compute_module.total_vector_flops_per_cycle# 一个周期可以执行的浮点次数运算��
             ) + 2 * ceil(# 读入和写出
                 M
                 * N

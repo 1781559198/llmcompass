@@ -22,11 +22,13 @@ from math import ceil
 def read_architecture_template(file_path):
     with open(file_path, "r") as f:
         arch_specs = json.load(f)
+    # 读取布尔
     return arch_specs
 
 
 def template_to_system(arch_specs):
     device_specs = arch_specs["device"]
+    is_yizhu_g100 = device_specs.get("Yizhu_G100", False)# 是否是Yizhu_G100
     compute_chiplet_specs = device_specs["compute_chiplet"]# 芯片组
     io_specs = device_specs["io"]
     core_specs = compute_chiplet_specs["core"]
@@ -52,14 +54,16 @@ def template_to_system(arch_specs):
         int(re.search(r"(\d+)", systolic_array_specs["data_type"]).group(1)) // 8,
     )
     # core
+    
     core = Core(
         vector_unit,
         systolic_array,
         sublane_count,
         core_specs["SRAM_KB"] * 1024,
-        core_specs["single_tpe"],
-        core_specs["sublane_count"],  
+        single_tpe=core_specs.get("single_tpe", False),  # 如果不存在则默认为 False
+        sublane_count=core_specs.get("sublane_count", 1) # 如果不存在则默认为 1
     )
+
     # compute module
     compute_module = ComputeModule(
         core,
@@ -82,7 +86,7 @@ def template_to_system(arch_specs):
         device_specs["memory"]["total_capacity_GB"] * 1024 * 1024 * 1024
     )
     # device
-    device = Device(compute_module, io_module, memory_module)
+    device = Device(compute_module, io_module, memory_module, is_yizhu_g100)
     # interconnect
     interconnect_specs = arch_specs["interconnect"]
     link_specs = interconnect_specs["link"]
@@ -110,8 +114,8 @@ def template_to_system(arch_specs):
 
 
 def test_template_to_system():
-    arch_specs = read_architecture_template("configs/template.json")
-    A100_system = template_to_system(arch_specs)
+    arch_specs, is_yizhu_g100 = read_architecture_template("configs/template.json")
+    A100_system = template_to_system(arch_specs, is_yizhu_g100)
     bs = 8
     s = 2048
     model = TransformerBlockInitComputationTP(
