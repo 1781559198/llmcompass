@@ -277,12 +277,6 @@ class Matmul(Operator):
         compile_mode: str = "exhaustive",
     ):
         min_cycle_count = 2**63 - 1
-        if pcb_module.is_yizhu_g100 and pcb_module.compute_module.core.single_tpe:
-            print("single_point")
-            pcb_module.compute_module.core.systolic_array_count = (
-                pcb_module.compute_module.core.systolic_array_count 
-                // pcb_module.compute_module.core.sublane_count
-            )
         best_mapping = None
         M = self.computational_graph.M
         N = self.computational_graph.N
@@ -291,7 +285,6 @@ class Matmul(Operator):
             compile_mode == "heuristic-GPU"
             or compile_mode == "heuristic-our-throughput"
         ):
-            print(11111111111111111)
             working_set_size = M * K + N * K + M * N
             total_io_count = working_set_size * self.data_type.word_size
             io_latency = total_io_count / pcb_module.io_module.bandwidth
@@ -509,7 +502,6 @@ class Matmul(Operator):
                                 best_mapping = mapping
         elif compile_mode == "heuristic-GPU":
             i = 0
-            print(22222222222222222)
             for l2_tile_M in [64, 128, 256, 512, 1024, 2048]:# 因子选择
                 for l2_tile_N in [l2_tile_M // 2, l2_tile_M, l2_tile_M * 2]:
                     if K <= 12288:
@@ -738,8 +730,8 @@ class Matmul(Operator):
         else:
             raise ValueError(f"compile_mode {compile_mode} not supported")
         self.best_mapping = best_mapping
-        if self.best_mapping is not None:
-             self.best_mapping.display()
+        # if self.best_mapping is not None:
+        #     self.best_mapping.display()
         self.best_cycle_count = min_cycle_count
         self.best_latency = min_cycle_count / pcb_module.compute_module.clock_freq
         self.latency = self.best_latency

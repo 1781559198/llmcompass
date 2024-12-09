@@ -66,9 +66,7 @@ class Core:
         vector_unit: VectorUnit,
         systolic_array: SystolicArray,
         systolic_array_count,
-        SRAM_size,
-        single_tpe: bool = False,    # 添加默认参数
-        sublane_count: int = 1,      # 添加默认参数
+        SRAM_size     # 添加默认参数
     ):
         self.vector_unit = vector_unit
         self.systolic_array = systolic_array
@@ -76,8 +74,8 @@ class Core:
         self.SRAM_size = SRAM_size  # Byte
         # assert(vector_unit.word_size==systolic_array.word_size)
         self.vector_word_size = vector_unit.word_size
-        self.single_tpe = single_tpe
-        self.sublane_count = sublane_count 
+     
+        
 
 
 core_dict = {

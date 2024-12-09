@@ -560,31 +560,37 @@ class TransformerBlockAutoRegressionTP(Operator):
             self.Q_proj.compile_and_simulate(pcb, compile_mode)
             + pcb.compute_module.overhead.matmul
         )
+        # print(f"qkv_latency: {qkv_latency:.6f} seconds")
         # print("simulating q_mul_k")
         q_mul_k_latency = (
             self.Q_mul_K.compile_and_simulate(pcb, compile_mode)
             + pcb.compute_module.overhead.matmul
         )
+        # print(f"q_mul_k_latency: {q_mul_k_latency:.6f} seconds")
         # print("simulating a_mul_v")
         a_mul_v_latency = (
             self.A_mul_V.compile_and_simulate(pcb, compile_mode)
             + pcb.compute_module.overhead.matmul
         )
+        # print(f"a_mul_v_latency: {a_mul_v_latency:.6f} seconds")
         # print("simulating h_matmul0")
         h_matmul0_latency = (
             self.H_matmul0.compile_and_simulate(pcb, compile_mode)
             + pcb.compute_module.overhead.matmul
         )
+        # print(f"h_matmul0_latency: {h_matmul0_latency:.6f} seconds")
         # print("simulating h1_matmul1")
         h1_matmul1_latency = (
             self.H_matmul1.compile_and_simulate(pcb, compile_mode)
             + pcb.compute_module.overhead.matmul
         )
+        # print(f"h1_matmul1_latency: {h1_matmul1_latency:.6f} seconds")
         # print("simulating h2_matmul2")
         h2_matmul2_latency = (
             self.H_matmul2.compile_and_simulate(pcb, compile_mode)
             + pcb.compute_module.overhead.matmul
         )
+        # print(f"h2_matmul2_latency: {h2_matmul2_latency:.6f} seconds")
 
         matmul_total_latency = (
             qkv_latency
@@ -600,10 +606,12 @@ class TransformerBlockAutoRegressionTP(Operator):
             self.A_softmax.compile_and_simulate(pcb, compile_mode)
             + pcb.compute_module.overhead.softmax
         )
+        # print(f"softmax_latency: {softmax_latency:.6f} seconds")
         layernorm_latency = (
             self.layer_norm0.compile_and_simulate(pcb, compile_mode)
             + pcb.compute_module.overhead.layernorm
         )
+        # print(f"layernorm_latency: {layernorm_latency:.6f} seconds")
 
         normlization_total_latency = softmax_latency + layernorm_latency * 2
 
@@ -612,7 +620,7 @@ class TransformerBlockAutoRegressionTP(Operator):
             self.H_gelu.compile_and_simulate(pcb, compile_mode)
             + pcb.compute_module.overhead.gelu
         )
-
+        # print(f"gelu_latency: {gelu_latency:.6f} seconds")
         # allreduce
         if self.device_count > 1:
             allreduce_latency = self.allreduce_mha.simulate(interconnect)

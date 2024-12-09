@@ -110,7 +110,7 @@ class Softmax(Operator):
         self.best_cycle_count = min_cycle_count
         self.best_latency = min_cycle_count / pcb_module.compute_module.clock_freq
         self.latency = self.best_latency
-        self.best_mapping.display()
+        #self.best_mapping.display()
         return self.latency
 
     def simulate(

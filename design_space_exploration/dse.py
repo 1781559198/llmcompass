@@ -58,10 +58,9 @@ def template_to_system(arch_specs):
     core = Core(
         vector_unit,
         systolic_array,
-        sublane_count,
+        1 if core_specs.get("single_tpe", False) else sublane_count,
+        # systolic_array_count,
         core_specs["SRAM_KB"] * 1024,
-        single_tpe=core_specs.get("single_tpe", False),  # 如果不存在则默认为 False
-        sublane_count=core_specs.get("sublane_count", 1) # 如果不存在则默认为 1
     )
 
     # compute module
