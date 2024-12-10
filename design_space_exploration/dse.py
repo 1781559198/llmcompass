@@ -28,9 +28,9 @@ def read_architecture_template(file_path):
 
 def template_to_system(arch_specs):
     device_specs = arch_specs["device"]
-    is_yizhu_g100 = device_specs.get("Yizhu_G100", False)# 是否是Yizhu_G100
     compute_chiplet_specs = device_specs["compute_chiplet"]# 芯片组
     io_specs = device_specs["io"]
+    io_3d_dram_specs = device_specs.get("io-3d-dram", None)# 3D DRAM
     core_specs = compute_chiplet_specs["core"]
     sublane_count = core_specs["sublane_count"]
     # vector unit
@@ -72,6 +72,7 @@ def template_to_system(arch_specs):
         io_specs["global_buffer_bandwidth_per_cycle_byte"],
         overhead_dict["A100"],
     )
+
     # io module
     io_module = IOModule(
         io_specs["memory_channel_active_count"] # 活跃的内存通道数量
@@ -80,6 +81,32 @@ def template_to_system(arch_specs):
         // 8, # 字节转换
         1e-6,
     )
+
+    # 3D DRAM compute module
+    if io_3d_dram_specs:
+        compute_module_3d_dram = ComputeModule(
+            core,
+            compute_chiplet_specs["core_count"] * device_specs["compute_chiplet_count"],
+            device_specs["frequency_Hz"],
+            io_3d_dram_specs["global_buffer_MB"] * 1024 * 1024,
+            io_3d_dram_specs["global_buffer_bandwidth_per_cycle_byte"],
+            overhead_dict["A100"],
+        )
+    else:
+        compute_module_3d_dram = None
+
+    # io-3d-dram
+    if io_3d_dram_specs:
+        io_3d_dram = IOModule(
+            io_3d_dram_specs["memory_channel_active_count"]
+            * io_3d_dram_specs["pin_count_per_channel"]
+            * io_3d_dram_specs["bandwidth_per_pin_bit"]
+            // 8,
+            1e-6,
+        )
+    else:
+        io_3d_dram = None  # 或者设置一个默认值
+
     # memory module
     memory_module = MemoryModule(
         device_specs["memory"]["total_capacity_GB"] * 1024 * 1024 * 1024

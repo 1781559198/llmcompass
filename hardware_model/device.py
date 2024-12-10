@@ -9,12 +9,13 @@ class Device:
         compute_module: ComputeModule,
         io_module: IOModule,
         memory_module: MemoryModule,
-        is_yizhu_g100: bool,
+        io_3d_dram: IOModule,
+
     ) -> None:
         self.compute_module = compute_module
         self.io_module = io_module
         self.memory_module = memory_module
-        self.is_yizhu_g100 = is_yizhu_g100
+        self.io_3d_dram = io_3d_dram
 
 device_dict = {
     "A100_80GB_fp16": Device(

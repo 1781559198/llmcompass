@@ -78,7 +78,6 @@
         },
         "memory": {
             "total_capacity_GB": 80
-        },
-        "Yizhu_G100": true
+        }
     }  
 }
