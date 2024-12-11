@@ -62,7 +62,7 @@
             "physical_global_buffer_MB": 224,
             "global_buffer_bandwidth_per_cycle_byte": 36864,
             "memory_channel_physical_count": 8,
-            "memory_channel_active_count": 4,
+            "memory_channel_active_count": 64,
             "pin_count_per_channel": 1024,
             "bandwidth_per_pin_bit": 3.2e9
         },
@@ -72,7 +72,7 @@
             "physical_global_buffer_MB": 2048,
             "global_buffer_bandwidth_per_cycle_byte": 32768,
             "memory_channel_physical_count": 8,
-            "memory_channel_active_count": 4,
+            "memory_channel_active_count": 64,
             "pin_count_per_channel": 1024,
             "bandwidth_per_pin_bit": 3.2e9
         },

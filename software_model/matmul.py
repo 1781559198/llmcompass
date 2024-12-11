@@ -285,7 +285,7 @@ class Matmul(Operator):
             compile_mode == "heuristic-GPU"
             or compile_mode == "heuristic-our-throughput"
         ):
-            working_set_size = M * K + N * K + M * N
+            working_set_size = M * K + N * K + M * N if pcb_module.io_3d_dram is None else M * K + M * N # add
             working_set_size_3d_dram = N * K if pcb_module.io_3d_dram is not None else 0 # add
             total_io_count = working_set_size * self.data_type.word_size
             total_io_count_3d_dram = working_set_size_3d_dram * self.data_type.word_size# add
@@ -308,10 +308,13 @@ class Matmul(Operator):
                 )'''
             else:
                 compute_3d_dram_latency = 0
-
             self.latency = max(
-                compute_latency + compute_3d_dram_latency, io_latency + io_latency_3d_dram # add
+                compute_latency + compute_3d_dram_latency, max(io_latency , io_latency_3d_dram) # add
             )  # + pcb_module.io_module.latency * 2
+            if pcb_module.io_3d_dram:
+                self.latency = (
+                    compute_latency + compute_3d_dram_latency + max(io_latency , io_latency_3d_dram) # add
+                )  # + pcb_module.io_module.latency * 2
             return self.latency
         if compile_mode == "exhaustive":
             for l2_tile_M_log2 in range(5, ceil(log2(self.computational_graph.M)) + 1):
@@ -1018,12 +1021,10 @@ class Matmul(Operator):
                 self.K_N_io_cycle_count = self.simulate_l2_tile_io_3d_dram_cycle_count(
                     K, N, data_type, pcb_module
                 ) 
-                print(3)
             else:
                 self.K_N_io_cycle_count = self.simulate_l2_tile_io_cycle_count(
                     K, N, data_type, pcb_module
                 ) 
-                print(0)
             
             self.M_N_io_cycle_count = self.simulate_l2_tile_io_cycle_count(
                 M, N, data_type, pcb_module
@@ -1247,7 +1248,7 @@ class Matmul(Operator):
                 )
 
                 current_batch_compute_cycle_count = 0# ？
-                if chiplet_module.io_3d_dram:
+                if not chiplet_module.io_3d_dram:
                     for i in range(len(active_l1_tile_list)):
                         temp_m, temp_n, temp_k, temp_l1_tile = active_l1_tile_list[i]
                         current_batch_Read_M_K[temp_m, temp_k] = 1
