@@ -52,6 +52,7 @@ def template_to_system(arch_specs):
         systolic_array_specs["mac_per_cycle"],
         int(re.search(r"(\d+)", systolic_array_specs["data_type"]).group(1)) // 8,
         int(re.search(r"(\d+)", systolic_array_specs["data_type"]).group(1)) // 8,
+        sublane_count *systolic_array_specs["array_height"] * systolic_array_specs["array_width"] * systolic_array_specs["mac_per_cycle"] * 2
     )
     # core
     
@@ -70,8 +71,32 @@ def template_to_system(arch_specs):
         device_specs["frequency_Hz"],
         io_specs["global_buffer_MB"] * 1024 * 1024,
         io_specs["global_buffer_bandwidth_per_cycle_byte"],
+        io_specs.get("io_3d_dram", {}).get("global_buffer_MB", 0) * 1024 * 1024,
+        # 0 if io_3d_dram_specs.get("global_buffer_MB", False) else ( io_3d_dram_specs["global_buffer_MB"] * 1024 * 1024 ),
+        io_specs.get("io_3d_dram", {}).get("global_buffer_bandwidth_per_cycle_byte", 0),
+        #0 if io_3d_dram_specs.get("global_buffer_bandwidth_per_cycle_byte", False) else io_3d_dram_specs["global_buffer_bandwidth_per_cycle_byte"],
         overhead_dict["A100"],
     )
+
+    # self.core = core
+    # self.core_count = core_count
+    # self.clock_freq = clock_freq
+    # self.l2_size = int(l2_size)  # global buffer
+    # self.l2_bandwidth_per_cycle = l2_bandwidth_per_cycle  # Byte/clock
+    # self.total_vector_flops_per_cycle = ( 
+    #     core.vector_unit.total_vector_flops_per_cycle * core_count # 总向量flops
+    # )
+    # self.total_vector_flops = self.total_vector_flops_per_cycle * clock_freq
+    # self.total_systolic_array_flops = ( # 总矩阵乘法flops计算
+    #     core_count # 核心数量
+    #     * core.systolic_array_count # 每个核心中矩阵乘法单元
+    #     * core.systolic_array.mac_per_cycle # 每个核心中矩阵乘法单元
+    #     * 2
+    #     * core.systolic_array.array_height # Systolic Array 的维度，表示矩阵乘法的规模
+    #     * core.systolic_array.array_width 
+    #     * clock_freq # 时钟频率
+    # )
+    # self.overhead = overhead
 
     # io module
     io_module = IOModule(
@@ -81,19 +106,6 @@ def template_to_system(arch_specs):
         // 8, # 字节转换
         1e-6,
     )
-
-    # 3D DRAM compute module
-    if io_3d_dram_specs:
-        compute_module_3d_dram = ComputeModule(
-            core,
-            compute_chiplet_specs["core_count"] * device_specs["compute_chiplet_count"],
-            device_specs["frequency_Hz"],
-            io_3d_dram_specs["global_buffer_MB"] * 1024 * 1024,
-            io_3d_dram_specs["global_buffer_bandwidth_per_cycle_byte"],
-            overhead_dict["A100"],
-        )
-    else:
-        compute_module_3d_dram = None
 
     # io-3d-dram
     if io_3d_dram_specs:
@@ -112,7 +124,7 @@ def template_to_system(arch_specs):
         device_specs["memory"]["total_capacity_GB"] * 1024 * 1024 * 1024
     )
     # device
-    device = Device(compute_module, io_module, memory_module, is_yizhu_g100)
+    device = Device(compute_module, io_module, memory_module, io_3d_dram)
     # interconnect
     interconnect_specs = arch_specs["interconnect"]
     link_specs = interconnect_specs["link"]

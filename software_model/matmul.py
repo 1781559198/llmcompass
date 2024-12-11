@@ -286,8 +286,11 @@ class Matmul(Operator):
             or compile_mode == "heuristic-our-throughput"
         ):
             working_set_size = M * K + N * K + M * N
+            working_set_size_3d_dram = N * K if pcb_module.io_3d_dram is not None else 0 # add
             total_io_count = working_set_size * self.data_type.word_size
+            total_io_count_3d_dram = working_set_size_3d_dram * self.data_type.word_size# add
             io_latency = total_io_count / pcb_module.io_module.bandwidth
+            io_latency_3d_dram = total_io_count_3d_dram / pcb_module.io_3d_dram.bandwidth if pcb_module.io_3d_dram is not None else 0# add
             total_flop_count = 2 * M * N * K
             compute_latency = (
                 total_flop_count
@@ -295,8 +298,19 @@ class Matmul(Operator):
                 / pcb_module.compute_module.core_count
                 / pcb_module.compute_module.clock_freq
             )
+            if pcb_module.io_3d_dram:
+                compute_3d_dram_latency = 0
+                '''(# add
+                    total_flop_count 
+                    / pcb_module.compute_module.core.systolic_array.total_systolic_array_flops_per_cycle
+                    / pcb_module.compute_module.core_count
+                    / pcb_module.compute_module.clock_freq  
+                )'''
+            else:
+                compute_3d_dram_latency = 0
+
             self.latency = max(
-                compute_latency, io_latency
+                compute_latency + compute_3d_dram_latency, io_latency + io_latency_3d_dram # add
             )  # + pcb_module.io_module.latency * 2
             return self.latency
         if compile_mode == "exhaustive":
@@ -913,7 +927,7 @@ class Matmul(Operator):
             l2_tile = l2_tiles[m, n, k]
             previous_l2_tile = l2_tiles[previous_m, previous_n, previous_k]
 
-            # 这里是为了不同 tile 的计算之间存在数据依赖性，某些方向的 tile 可能会重复使���上一方向的部分数据
+            # 这里是为了不同 tile 的计算之间存在数据依赖性，某些方向的 tile 可能会重复使上一方向的部分数据
             # current tile read latency
             if m == previous_m and k == previous_k:# 当前的tile的m和k与前一个tile相同，仅加载k * n 的数据
                 current_tile_read_cycle_count = l2_tile.K_N_io_cycle_count
@@ -999,9 +1013,18 @@ class Matmul(Operator):
             self.M_K_io_cycle_count = self.simulate_l2_tile_io_cycle_count(
                 M, K, data_type, pcb_module
             )
-            self.K_N_io_cycle_count = self.simulate_l2_tile_io_cycle_count(
-                K, N, data_type, pcb_module
-            )
+
+            if pcb_module.io_3d_dram:
+                self.K_N_io_cycle_count = self.simulate_l2_tile_io_3d_dram_cycle_count(
+                    K, N, data_type, pcb_module
+                ) 
+                print(3)
+            else:
+                self.K_N_io_cycle_count = self.simulate_l2_tile_io_cycle_count(
+                    K, N, data_type, pcb_module
+                ) 
+                print(0)
+            
             self.M_N_io_cycle_count = self.simulate_l2_tile_io_cycle_count(
                 M, N, data_type, pcb_module
             )
@@ -1011,7 +1034,7 @@ class Matmul(Operator):
 
         def simulate_l2_tile_io_cycle_count(
             self, M: int, N: int, data_type: DataType, chiplet_module: Device
-        ):
+        ):# io
             return ceil(
                 M
                 * N
@@ -1019,8 +1042,19 @@ class Matmul(Operator):
                 / (
                     chiplet_module.io_module.bandwidth
                     / chiplet_module.compute_module.clock_freq
-                )
-            )
+                ))
+        
+        def simulate_l2_tile_io_3d_dram_cycle_count(
+            self, M: int, N: int, data_type: DataType, chiplet_module: Device
+        ):
+             return ceil(
+                M
+                * N
+                * data_type.word_size
+                / (
+                    chiplet_module.io_3d_dram.bandwidth
+                    / chiplet_module.compute_module.clock_freq
+                ))   
 
         def simulate_l2_tile_compute_cycle_count(
             self,
@@ -1213,23 +1247,24 @@ class Matmul(Operator):
                 )
 
                 current_batch_compute_cycle_count = 0# ？
-                for i in range(len(active_l1_tile_list)):
-                    temp_m, temp_n, temp_k, temp_l1_tile = active_l1_tile_list[i]
-                    current_batch_Read_M_K[temp_m, temp_k] = 1
-                    current_batch_Read_K_N[temp_k, temp_n] = 1
-                    current_batch_Read_M_N[temp_m, temp_n] = temp_k > 0
-                    current_batch_Write_M_N[temp_m, temp_n] = 1
-                    temp_l1_tile_compute_cycle_count = temp_l1_tile.compute_cycle_count
-                    if temp_k > 0:
-                        temp_l1_tile_compute_cycle_count += ceil(
-                            temp_l1_tile.M
-                            * temp_l1_tile.N
-                            / chiplet_module.compute_module.core.vector_unit.total_vector_flops_per_cycle
+                if chiplet_module.io_3d_dram:
+                    for i in range(len(active_l1_tile_list)):
+                        temp_m, temp_n, temp_k, temp_l1_tile = active_l1_tile_list[i]
+                        current_batch_Read_M_K[temp_m, temp_k] = 1
+                        current_batch_Read_K_N[temp_k, temp_n] = 1
+                        current_batch_Read_M_N[temp_m, temp_n] = temp_k > 0
+                        current_batch_Write_M_N[temp_m, temp_n] = 1
+                        temp_l1_tile_compute_cycle_count = temp_l1_tile.compute_cycle_count
+                        if temp_k > 0:
+                            temp_l1_tile_compute_cycle_count += ceil(
+                                temp_l1_tile.M
+                                * temp_l1_tile.N
+                                / chiplet_module.compute_module.core.vector_unit.total_vector_flops_per_cycle
+                            )
+                        current_batch_compute_cycle_count = max(# 当前批次极端最慢的tile的
+                            current_batch_compute_cycle_count,
+                            temp_l1_tile_compute_cycle_count,
                         )
-                    current_batch_compute_cycle_count = max(# 当前批次极端最慢的tile的
-                        current_batch_compute_cycle_count,
-                        temp_l1_tile_compute_cycle_count,
-                    )
 
                 # if one output tile in this batch shares input/output with another output tile in the previous batch, assign them to the same core to avoid data movement
                 # note that of the three input matrix mk, kn, mn, at most one of them can be the same if we change m,n,k
