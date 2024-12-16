@@ -71,10 +71,8 @@ def template_to_system(arch_specs):
         device_specs["frequency_Hz"],
         io_specs["global_buffer_MB"] * 1024 * 1024,
         io_specs["global_buffer_bandwidth_per_cycle_byte"],
-        io_specs.get("io_3d_dram", {}).get("global_buffer_MB", 0) * 1024 * 1024,
-        # 0 if io_3d_dram_specs.get("global_buffer_MB", False) else ( io_3d_dram_specs["global_buffer_MB"] * 1024 * 1024 ),
-        io_specs.get("io_3d_dram", {}).get("global_buffer_bandwidth_per_cycle_byte", 0),
-        #0 if io_3d_dram_specs.get("global_buffer_bandwidth_per_cycle_byte", False) else io_3d_dram_specs["global_buffer_bandwidth_per_cycle_byte"],
+        0 if io_3d_dram_specs is None else (io_3d_dram_specs["global_buffer_MB"] * 1024 * 1024),
+        0 if io_3d_dram_specs is None else io_3d_dram_specs["global_buffer_bandwidth_per_cycle_byte"],
         overhead_dict["A100"],
     )
 
