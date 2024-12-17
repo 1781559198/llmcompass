@@ -793,8 +793,8 @@ class Matmul(Operator):
         else:
             raise ValueError(f"compile_mode {compile_mode} not supported")
         self.best_mapping = best_mapping
-        if self.best_mapping is not None:
-            self.best_mapping.display()
+        #if self.best_mapping is not None:
+        #    self.best_mapping.display()
         self.best_cycle_count = min_cycle_count
         self.best_latency = min_cycle_count / pcb_module.compute_module.clock_freq
         self.latency = self.best_latency
@@ -1388,14 +1388,39 @@ class Matmul(Operator):
                     + current_batch_K_N_read_count
                     + current_batch_M_N_read_count
                 )
+                if chiplet_module.io_3d_dram:
+                    current_batch_read_count = (
+                        current_batch_M_K_read_count
+                        + current_batch_M_N_read_count
+                    )
+                    current_batch_3d_dram_read_count = current_batch_K_N_read_count
+                else:
+                    current_batch_3d_dram_read_count = 0
+                current_batch_read_count = current_batch_read_count + current_batch_3d_dram_read_count
+
                 current_batch_read_cycle_count = ceil(
                     current_batch_read_count
                     * chiplet_module.compute_module.core.systolic_array.input_word_size
                     / chiplet_module.compute_module.l2_bandwidth_per_cycle
                 )
+                if chiplet_module.io_3d_dram:
+                    current_batch_read_cycle_count = ceil(
+                    current_batch_read_count
+                    * chiplet_module.compute_module.core.vector_unit.word_size
+                        / chiplet_module.compute_module.l2_bandwidth_per_cycle
+                    )
+                    current_batch_read_3d_dramcycle_count = ceil(
+                    current_batch_3d_dram_read_count
+                    * chiplet_module.compute_module.core.systolic_array.input_word_size
+                        / chiplet_module.compute_module.io_3d_dram_bandwidth_per_cycle
+                    )
+                else:
+                    current_batch_read_3d_dramcycle_count = 0
+                current_batch_read_cycle_count =current_batch_read_cycle_count + current_batch_read_3d_dramcycle_count
+
                 prvious_batch_write_cycle_count = ceil(
                     previous_batch_M_N_write_count
-                    * chiplet_module.compute_module.core.systolic_array.output_word_size
+                    * chiplet_module.compute_module.core.vector_unit.word_size
                     / chiplet_module.compute_module.l2_bandwidth_per_cycle
                 )
 
