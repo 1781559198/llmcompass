@@ -583,14 +583,29 @@ class Matmul(Operator):
                                 is_l2_3d_dram_double_buffering = True
                             else:
                                 is_l2_3d_dram_double_buffering = False
+
                         # L1
-                        for l1_tile_M in [32, 64, 128, 256]:
+                        for l1_tile_M in [16, 32, 64, 128]:
                             if l1_tile_M > min(l2_tile_M, l2_tile_N):
                                 continue
                             l1_tile_N = l1_tile_M
                             for l1_K_tiling_factor in [1, 2, 4, 8, 16, 32]:
                                 l1_tile_K = ceil(l2_tile_K / l1_K_tiling_factor)
-                                if pcb_module.io_3d_dram is None:
+                                if pcb_module.io_3d_dram:
+                                    if (
+                                        l1_tile_M * l1_tile_N
+                                        + l1_tile_M * l1_tile_K
+                                        > pcb_module.compute_module.core.SRAM_size# local buffer
+                                        // self.data_type.word_size
+                                        // 2
+                                    ) or (
+                                        l1_tile_N * l1_tile_K
+                                        > pcb_module.compute_module.io_3d_dram_size
+                                        // self.data_type.word_size
+                                        // 2
+                                    ):
+                                        continue
+                                else:
                                     if (
                                         l1_tile_M * l1_tile_N
                                         + l1_tile_N * l1_tile_K
@@ -600,20 +615,7 @@ class Matmul(Operator):
                                         // 2
                                     ):
                                         continue
-                                else:
-                                    if (
-                                        l1_tile_M * l1_tile_N
-                                        + l1_tile_M * l1_tile_K
-                                        > pcb_module.compute_module.core.SRAM_size# local buffer
-                                        // self.data_type.word_size
-                                        // 2
-                                    ) and (
-                                        l1_tile_N * l1_tile_K
-                                        > pcb_module.compute_module.io_3d_dram_size
-                                        // self.data_type.word_size
-                                        // 2
-                                    ):
-                                        continue
+
                                 l2_loop_order = "knm"
                                 l1_loop_order = "knm"
                                 for (
@@ -791,8 +793,8 @@ class Matmul(Operator):
         else:
             raise ValueError(f"compile_mode {compile_mode} not supported")
         self.best_mapping = best_mapping
-        # if self.best_mapping is not None:
-        #     self.best_mapping.display()
+        if self.best_mapping is not None:
+            self.best_mapping.display()
         self.best_cycle_count = min_cycle_count
         self.best_latency = min_cycle_count / pcb_module.compute_module.clock_freq
         self.latency = self.best_latency
@@ -848,7 +850,7 @@ class Matmul(Operator):
         l2_tile_N = mapping.l2_tile_N
         l2_tile_K = mapping.l2_tile_K
 
-        if mapping.is_l2_double_buffering:
+        if mapping.is_l2_double_buffering and not pcb_module.io_3d_dram:
             assert (
                 l2_tile_M * l2_tile_N + l2_tile_N * l2_tile_K + l2_tile_M * l2_tile_K
                 <= pcb_module.compute_module.l2_size // self.data_type.word_size // 2 # global buffer
@@ -860,21 +862,25 @@ class Matmul(Operator):
             )
         
         if pcb_module.io_3d_dram:
-            if mapping.is_l2_double_buffering and mapping.is_l2_3d_dram_double_buffering:
+            if mapping.is_l2_double_buffering:
                 assert (
                     l2_tile_M * l2_tile_N +  l2_tile_M * l2_tile_K
                     <= pcb_module.compute_module.l2_size // self.data_type.word_size // 2 # global buffer
-                ) and (
-                    l2_tile_N * l2_tile_K <= pcb_module.compute_module.io_3d_dram_size // self.data_type.word_size // 2
                 )
             else:
                 assert (
                     l2_tile_M * l2_tile_N + l2_tile_M * l2_tile_K
                     <= pcb_module.compute_module.l2_size // self.data_type.word_size
-                ) and (
+                )
+            if mapping.is_l2_3d_dram_double_buffering:
+                assert(
+                    l2_tile_N * l2_tile_K <= pcb_module.compute_module.io_3d_dram_size // self.data_type.word_size // 2
+                )
+            else:
+                assert(
                     l2_tile_N * l2_tile_K <= pcb_module.compute_module.io_3d_dram_size // self.data_type.word_size
                 )
-
+            
         M_l2_t = M // l2_tile_M
         N_l2_t = N // l2_tile_N
         K_l2_t = K // l2_tile_K
@@ -977,6 +983,8 @@ class Matmul(Operator):
         previous_m = 0
         previous_n = 0
         previous_k = 0
+        current_tile_3d_dram_read_cycle_count = 0
+        total_cycle_count_3d_dram = 0
 
         for m, n, k in self.generate_tile_loops(
             ceil(M / l2_tile_M),
@@ -997,9 +1005,12 @@ class Matmul(Operator):
             elif n == previous_n and k == previous_k:# 当前的tile的n和k与前一个tile相同，仅加载m * k 的数据
                 current_tile_read_cycle_count = l2_tile.M_K_io_cycle_count
             else:# 否则同时加载m * k, k * n 的数据
-                current_tile_read_cycle_count = (
-                    l2_tile.M_K_io_cycle_count + l2_tile.K_N_io_cycle_count
-                )
+                if pcb_module.io_3d_dram:# 如果是g100，则取最大值
+                    current_tile_read_cycle_count = l2_tile.M_K_io_cycle_count
+                    current_tile_3d_dram_read_cycle_count = l2_tile.K_N_io_cycle_count
+                else:
+                    current_tile_read_cycle_count =l2_tile.M_K_io_cycle_count + l2_tile.K_N_io_cycle_count
+                         
             if k > 0 and not (m == previous_m and n == previous_n):# 如果k发生了变化，还得加载m * n 的结果
                 current_tile_read_cycle_count += l2_tile.M_N_io_cycle_count
 
@@ -1017,7 +1028,7 @@ class Matmul(Operator):
                 previous_tile_write_cycle_count = previous_l2_tile.M_N_io_cycle_count
 
             # read current tile, compute previous tile, write previous tile
-            if mapping.is_l2_double_buffering or mapping.is_l2_3d_dram_double_buffering:  # pipelined
+            if mapping.is_l2_double_buffering:  # pipelined
                 total_cycle_count += (
                     max(# 双缓冲的时候，数据加载（current_tile_read_cycle_count）和前一个 tile 的计算（previous_tile_compute_cycle_count）
                         # 是并行进行的，但这两个操作的执行时间可能不同，取最大值
@@ -1032,6 +1043,26 @@ class Matmul(Operator):
                     + previous_tile_write_cycle_count
                 )
 
+            if pcb_module.io_3d_dram:
+                if mapping.is_l2_3d_dram_double_buffering:  # pipelined
+                    total_cycle_count_3d_dram += (
+                        max(# 双缓冲的时候，数据加载（current_tile_read_cycle_count）和前一个 tile 的计算（previous_tile_compute_cycle_count）
+                            # 是并行进行的，但这两个操作的执行时间可能不同，取最大值
+                            current_tile_3d_dram_read_cycle_count, previous_tile_compute_cycle_count
+                        )
+                        + previous_tile_write_cycle_count
+                )
+                else:  # non-pipelined
+                    total_cycle_count_3d_dram += (
+                        current_tile_3d_dram_read_cycle_count
+                        + previous_tile_compute_cycle_count
+                        + previous_tile_write_cycle_count
+                    )
+            else:
+                total_cycle_count_3d_dram = 0
+
+            total_cycle_count = max(total_cycle_count, total_cycle_count_3d_dram)
+
             previous_m = m
             previous_n = n
             previous_k = k
@@ -1044,6 +1075,8 @@ class Matmul(Operator):
 
         if previous_k > 0:
             total_cycle_count += ceil(l2_tiles[-1, -1, -1].K_reduction_cycle_count)
+
+
 
         return total_cycle_count #+ ceil(
         # pcb_module.io_module.latency * 2 * pcb_module.compute_module.clock_freq
@@ -1308,24 +1341,24 @@ class Matmul(Operator):
                 )
 
                 current_batch_compute_cycle_count = 0# ？
-                if not chiplet_module.io_3d_dram:
-                    for i in range(len(active_l1_tile_list)):
-                        temp_m, temp_n, temp_k, temp_l1_tile = active_l1_tile_list[i]
-                        current_batch_Read_M_K[temp_m, temp_k] = 1
-                        current_batch_Read_K_N[temp_k, temp_n] = 1
-                        current_batch_Read_M_N[temp_m, temp_n] = temp_k > 0
-                        current_batch_Write_M_N[temp_m, temp_n] = 1
-                        temp_l1_tile_compute_cycle_count = temp_l1_tile.compute_cycle_count
+                for i in range(len(active_l1_tile_list)):
+                    temp_m, temp_n, temp_k, temp_l1_tile = active_l1_tile_list[i]
+                    current_batch_Read_M_K[temp_m, temp_k] = 1
+                    current_batch_Read_K_N[temp_k, temp_n] = 1
+                    current_batch_Read_M_N[temp_m, temp_n] = temp_k > 0
+                    current_batch_Write_M_N[temp_m, temp_n] = 1
+                    temp_l1_tile_compute_cycle_count = temp_l1_tile.compute_cycle_count
+                    if not chiplet_module.io_3d_dram:
                         if temp_k > 0:
                             temp_l1_tile_compute_cycle_count += ceil(
                                 temp_l1_tile.M
                                 * temp_l1_tile.N
                                 / chiplet_module.compute_module.core.vector_unit.total_vector_flops_per_cycle
                             )
-                        current_batch_compute_cycle_count = max(# 当前批次极端最慢的tile的
-                            current_batch_compute_cycle_count,
-                            temp_l1_tile_compute_cycle_count,
-                        )
+                    current_batch_compute_cycle_count = max(# 当前批次极端最慢的tile的
+                        current_batch_compute_cycle_count,
+                        temp_l1_tile_compute_cycle_count,
+                    )
 
                 # if one output tile in this batch shares input/output with another output tile in the previous batch, assign them to the same core to avoid data movement
                 # note that of the three input matrix mk, kn, mn, at most one of them can be the same if we change m,n,k
@@ -1349,7 +1382,7 @@ class Matmul(Operator):
                     * M_N_tile_size
                 )
 
-                # read current batch while compute and write previous batch
+             # read current batch while compute and write previous batch
                 current_batch_read_count = (
                     current_batch_M_K_read_count
                     + current_batch_K_N_read_count
@@ -1420,12 +1453,28 @@ class Matmul(Operator):
             chiplet_module: Device,
             look_up_table: pd.DataFrame,
         ):
-            assert (
-                M * K + K * N + M * N
-                <= chiplet_module.compute_module.core.SRAM_size
-                // data_type.word_size
-                // 2
-            )
+            if chiplet_module.io_3d_dram:
+                if M * K + M * N > chiplet_module.compute_module.core.SRAM_size // data_type.word_size // 2:
+                    return float('inf')
+                assert(
+                    M * K + M * N
+                    <= chiplet_module.compute_module.core.SRAM_size
+                    // data_type.word_size
+                    // 2
+                )
+                assert(
+                    K * N
+                    <= chiplet_module.compute_module.io_3d_dram_size
+                    // data_type.word_size
+                    // 2
+                )
+            else:
+                assert (
+                    M * K + K * N + M * N
+                    <= chiplet_module.compute_module.core.SRAM_size
+                    // data_type.word_size
+                    // 2
+                )
 
             M_tiling_factor = mapping.l0_M_tiling_factor
             N_tiling_factor = mapping.l0_N_tiling_factor

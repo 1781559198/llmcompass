@@ -4,7 +4,7 @@ from software_model.utils import DataType, data_type_dict
 from software_model.utils import data_type_dict, Tensor
 
 
-specs = read_architecture_template(r"configs\GA100.json")
+specs = read_architecture_template(r"configs\G100.json")
 system = template_to_system(specs)
 
 #定义序列长度和批次大小
