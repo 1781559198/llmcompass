@@ -231,7 +231,7 @@ class Matmul(Operator):
             l0_M_tiling_factor: int,
             l0_N_tiling_factor: int,
             l0_K_tiling_factor: int,
-            dataflow: str = "os",
+            dataflow: str = "os",          
         ):
             self.l2_tile_M = l2_tile_M
             self.l2_tile_N = l2_tile_N
@@ -319,6 +319,7 @@ class Matmul(Operator):
                 )  # + pcb_module.io_module.latency * 2
             return self.latency
         if compile_mode == "exhaustive":
+            is_l2_3d_dram_double_buffering = False
             for l2_tile_M_log2 in range(5, ceil(log2(self.computational_graph.M)) + 1):
                 l2_tile_M = 2**l2_tile_M_log2
                 for l2_tile_N_log2 in range(
@@ -349,21 +350,38 @@ class Matmul(Operator):
                             is_l2_double_buffering = True
                         else:
                             is_l2_double_buffering = False
+                        assert is_l2_double_buffering
+
                         for l1_tile_M_log2 in range(5, l2_tile_M_log2 + 1):
                             l1_tile_M = 2**l1_tile_M_log2
                             for l1_tile_N_log2 in range(5, l2_tile_N_log2 + 1):
                                 l1_tile_N = 2**l1_tile_N_log2
                                 for l1_tile_K_log2 in range(5, l2_tile_K_log2 + 1):
                                     l1_tile_K = 2**l1_tile_K_log2
-                                    if (
-                                        l1_tile_M * l1_tile_N
-                                        + l1_tile_N * l1_tile_K
-                                        + l1_tile_M * l1_tile_K
-                                        > pcb_module.compute_module.core.SRAM_size
-                                        // self.data_type.word_size
-                                        // 2
-                                    ):
-                                        continue
+                                    if pcb_module.io_3d_dram:
+                                        if (
+                                            l1_tile_M * l1_tile_N
+                                            + l1_tile_M * l1_tile_K
+                                            > pcb_module.compute_module.core.SRAM_size# local buffer
+                                            // self.data_type.word_size
+                                            // 2
+                                        ) or (
+                                            l1_tile_N * l1_tile_K
+                                            > pcb_module.compute_module.io_3d_dram_size
+                                            // self.data_type.word_size
+                                            // 2
+                                        ):
+                                            continue
+                                    else:
+                                        if (
+                                            l1_tile_M * l1_tile_N
+                                            + l1_tile_N * l1_tile_K
+                                            + l1_tile_M * l1_tile_K
+                                            > pcb_module.compute_module.core.SRAM_size# local buffer
+                                            // self.data_type.word_size
+                                            // 2
+                                        ):
+                                            continue
                                     for l2_loop_order in [
                                         "mkn",
                                         "mnk",
@@ -392,6 +410,7 @@ class Matmul(Operator):
                                                     l2_tile_N,
                                                     l2_tile_K,
                                                     is_l2_double_buffering,
+                                                    is_l2_3d_dram_double_buffering,
                                                     l1_tile_M,
                                                     l1_tile_N,
                                                     l1_tile_K,
@@ -411,6 +430,7 @@ class Matmul(Operator):
                                                     best_mapping = mapping
         elif compile_mode == "heuristic-our-throughput":
             i = 0
+            is_l2_3d_dram_double_buffering = False
             for l2_tile_M in [32, 64, 128, 256, 512, 1024, 2048, 4096]:
                 for l2_tile_N in [
                     l2_tile_M // 4,
@@ -439,6 +459,7 @@ class Matmul(Operator):
                         + l2_tile_M * l2_tile_K
                         + l2_tile_M * l2_tile_N
                     )
+
                     if (
                         working_set_size
                         > pcb_module.compute_module.l2_size // self.data_type.word_size
@@ -453,7 +474,6 @@ class Matmul(Operator):
                         is_l2_double_buffering = True
                     else:
                         is_l2_double_buffering = False
-
                     assert is_l2_double_buffering
 
                     for l1_tile_M in [32, 64, 128, 256]:
@@ -499,6 +519,7 @@ class Matmul(Operator):
                                 l2_tile_N,
                                 l2_tile_K,
                                 is_l2_double_buffering,
+                                is_l2_3d_dram_double_buffering,
                                 l1_tile_M,
                                 l1_tile_N,
                                 l1_tile_K,
@@ -660,6 +681,7 @@ class Matmul(Operator):
             l2_tile_K = self.computational_graph.K
 
             is_l2_double_buffering = True
+            is_l2_3d_dram_double_buffering = False
             for l1_tile_M in [l2_tile_M, 64, 128, 256, 512, 1024, 2048, 4096, 8192]:
                 if l1_tile_M > l2_tile_M * 2:
                     continue
@@ -701,6 +723,7 @@ class Matmul(Operator):
                             l2_tile_N,
                             l2_tile_K,
                             is_l2_double_buffering,
+                            is_l2_3d_dram_double_buffering,
                             l1_tile_M,
                             l1_tile_N,
                             l1_tile_K,
@@ -728,6 +751,7 @@ class Matmul(Operator):
             l2_tile_K = self.computational_graph.K
 
             is_l2_double_buffering = True
+            is_l2_3d_dram_double_buffering = False
             for l1_tile_M in [l2_tile_M, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192]:
                 if l1_tile_M > l2_tile_M * 2:
                     continue
@@ -769,6 +793,7 @@ class Matmul(Operator):
                             l2_tile_N,
                             l2_tile_K,
                             is_l2_double_buffering,
+                            is_l2_3d_dram_double_buffering,
                             l1_tile_M,
                             l1_tile_N,
                             l1_tile_K,
@@ -850,17 +875,7 @@ class Matmul(Operator):
         l2_tile_N = mapping.l2_tile_N
         l2_tile_K = mapping.l2_tile_K
 
-        if mapping.is_l2_double_buffering and not pcb_module.io_3d_dram:
-            assert (
-                l2_tile_M * l2_tile_N + l2_tile_N * l2_tile_K + l2_tile_M * l2_tile_K
-                <= pcb_module.compute_module.l2_size // self.data_type.word_size // 2 # global buffer
-            )
-        else:
-            assert (
-                l2_tile_M * l2_tile_N + l2_tile_N * l2_tile_K + l2_tile_M * l2_tile_K
-                <= pcb_module.compute_module.l2_size // self.data_type.word_size
-            )
-        
+
         if pcb_module.io_3d_dram:
             if mapping.is_l2_double_buffering:
                 assert (
@@ -880,7 +895,18 @@ class Matmul(Operator):
                 assert(
                     l2_tile_N * l2_tile_K <= pcb_module.compute_module.io_3d_dram_size // self.data_type.word_size
                 )
-            
+        else:
+            if mapping.is_l2_double_buffering:
+                assert (
+                    l2_tile_M * l2_tile_N + l2_tile_N * l2_tile_K + l2_tile_M * l2_tile_K
+                    <= pcb_module.compute_module.l2_size // self.data_type.word_size // 2 # global buffer
+                )
+            else:
+                assert (
+                    l2_tile_M * l2_tile_N + l2_tile_N * l2_tile_K + l2_tile_M * l2_tile_K
+                    <= pcb_module.compute_module.l2_size // self.data_type.word_size
+                )
+               
         M_l2_t = M // l2_tile_M
         N_l2_t = N // l2_tile_N
         K_l2_t = K // l2_tile_K
