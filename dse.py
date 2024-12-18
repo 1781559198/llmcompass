@@ -22,13 +22,15 @@ from math import ceil
 def read_architecture_template(file_path):
     with open(file_path, "r") as f:
         arch_specs = json.load(f)
+    # 读取布尔
     return arch_specs
 
 
 def template_to_system(arch_specs):
     device_specs = arch_specs["device"]
-    compute_chiplet_specs = device_specs["compute_chiplet"]
+    compute_chiplet_specs = device_specs["compute_chiplet"]# 芯片组
     io_specs = device_specs["io"]
+    io_3d_dram_specs = device_specs.get("io_3d_dram", None)# 3D DRAM
     core_specs = compute_chiplet_specs["core"]
     sublane_count = core_specs["sublane_count"]
     # vector unit
@@ -50,19 +52,18 @@ def template_to_system(arch_specs):
         systolic_array_specs["mac_per_cycle"],
         int(re.search(r"(\d+)", systolic_array_specs["data_type"]).group(1)) // 8,
         int(re.search(r"(\d+)", systolic_array_specs["data_type"]).group(1)) // 8,
+        sublane_count *systolic_array_specs["array_height"] * systolic_array_specs["array_width"] * systolic_array_specs["mac_per_cycle"] * 2
     )
     # core
-    is_g100 = True if core_specs has single_tpe else False
-    if (core_specs not has "single_tpe"):
-        core_specs["single_tpe"] = False
+    
     core = Core(
         vector_unit,
         systolic_array,
-        sublane_count,
+        1 if core_specs.get("single_tpe", False) else sublane_count,
+        # systolic_array_count,
         core_specs["SRAM_KB"] * 1024,
-        core_specs["single_tpe"],
-        core_specs["sublane_count"],  
     )
+
     # compute module
     compute_module = ComputeModule(
         core,
@@ -70,8 +71,31 @@ def template_to_system(arch_specs):
         device_specs["frequency_Hz"],
         io_specs["global_buffer_MB"] * 1024 * 1024,
         io_specs["global_buffer_bandwidth_per_cycle_byte"],
+        0 if io_3d_dram_specs is None else (io_3d_dram_specs["global_buffer_MB"] * 1024 * 1024),
+        0 if io_3d_dram_specs is None else io_3d_dram_specs["global_buffer_bandwidth_per_cycle_byte"],
         overhead_dict["A100"],
     )
+
+    # self.core = core
+    # self.core_count = core_count
+    # self.clock_freq = clock_freq
+    # self.l2_size = int(l2_size)  # global buffer
+    # self.l2_bandwidth_per_cycle = l2_bandwidth_per_cycle  # Byte/clock
+    # self.total_vector_flops_per_cycle = ( 
+    #     core.vector_unit.total_vector_flops_per_cycle * core_count # 总向量flops
+    # )
+    # self.total_vector_flops = self.total_vector_flops_per_cycle * clock_freq
+    # self.total_systolic_array_flops = ( # 总矩阵乘法flops计算
+    #     core_count # 核心数量
+    #     * core.systolic_array_count # 每个核心中矩阵乘法单元
+    #     * core.systolic_array.mac_per_cycle # 每个核心中矩阵乘法单元
+    #     * 2
+    #     * core.systolic_array.array_height # Systolic Array 的维度，表示矩阵乘法的规模
+    #     * core.systolic_array.array_width 
+    #     * clock_freq # 时钟频率
+    # )
+    # self.overhead = overhead
+
     # io module
     io_module = IOModule(
         io_specs["memory_channel_active_count"] # 活跃的内存通道数量
@@ -80,14 +104,25 @@ def template_to_system(arch_specs):
         // 8, # 字节转换
         1e-6,
     )
-    io_3dram_module = IOModule(
-        io-3dram
+
+    # io_3d_dram
+    if io_3d_dram_specs:
+        io_3d_dram = IOModule(
+            io_3d_dram_specs["memory_channel_active_count"]
+            * io_3d_dram_specs["pin_count_per_channel"]
+            * io_3d_dram_specs["bandwidth_per_pin_bit"]
+            // 8,
+            1e-6,
+        )
+    else:
+        io_3d_dram = None  # 或者设置一个默认值
+
     # memory module
     memory_module = MemoryModule(
         device_specs["memory"]["total_capacity_GB"] * 1024 * 1024 * 1024
     )
     # device
-    device = Device(compute_module, io_module, memory_module)
+    device = Device(compute_module, io_module, memory_module, io_3d_dram)
     # interconnect
     interconnect_specs = arch_specs["interconnect"]
     link_specs = interconnect_specs["link"]
@@ -115,8 +150,8 @@ def template_to_system(arch_specs):
 
 
 def test_template_to_system():
-    arch_specs = read_architecture_template("configs/template.json")
-    A100_system = template_to_system(arch_specs)
+    arch_specs, is_yizhu_g100 = read_architecture_template("configs/template.json")
+    A100_system = template_to_system(arch_specs, is_yizhu_g100)
     bs = 8
     s = 2048
     model = TransformerBlockInitComputationTP(
