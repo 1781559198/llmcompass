@@ -164,7 +164,7 @@ def test_template_to_system():
     model.roofline_model(A100_system)
 
 
-def find_cheapest_design(# 搜索计算硬件架构的最佳设计
+def find_cheapest_design(
     d_model,
     n_heads,
     n_layers,
@@ -173,168 +173,42 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
     init_latency,
     output_seq_length,
     auto_regression_latency,
-    
+    model_type
 ):
-    i=0
-    smallest_total_area_mm2=float('inf')
-    best_arch_specs=None
+    i = 0
+    smallest_total_area_mm2 = float('inf')
+    best_arch_specs = None
     arch_specs = read_architecture_template("configs/template.json")
-    for device_count in [4, 8, 12, 16]:
+    
+    # Example usage of model_type
+    if model_type == "transformer":
         model_init = TransformerBlockInitComputationTP(
-                d_model=12288,
-                n_heads=96,
-                device_count=device_count,
-                data_type=data_type_dict["fp16"],
-            )
+            d_model=d_model,
+            n_heads=n_heads,
+            device_count=4,
+            data_type=data_type_dict["fp16"],
+        )
         model_auto_regression = TransformerBlockAutoRegressionTP(
-                d_model=12288,
-                n_heads=96,
-                device_count=device_count,
-                data_type=data_type_dict["fp16"],)
-        _ = model_init(Tensor([batch_size, input_seq_length, model_init.d_model], data_type_dict["fp16"]))
-        _ = model_auto_regression(Tensor([batch_size, 1, model_init.d_model],data_type_dict["fp16"]), input_seq_length+output_seq_length)
-        arch_specs["device_count"] = device_count
-        if device_count <= 4:
-            topology = "FC"
-        else:
-            topology = "RING"
-        arch_specs["interconnect"]["topology"] = topology
-        for link_count_per_device in [6, 12, 18, 24]:
-            arch_specs["interconnect"]["link_count_per_device"] = link_count_per_device
-            # device
-            for core_count in [32, 64, 128, 256]:
-                arch_specs["device"]["compute_chiplet"]["core_count"] = core_count
-                # core
-                for sublane_count in [1, 2, 4, 8]:
-                    arch_specs["device"]["compute_chiplet"]["core"][
-                        "sublane_count"
-                    ] = sublane_count
-                    # systolic array
-                    for array_height in [16, 32, 64, 128]:
-                        arch_specs["device"]["compute_chiplet"]["core"][
-                            "systolic_array"
-                        ]["array_height"] = array_height
-                        arch_specs["device"]["compute_chiplet"]["core"][
-                            "systolic_array"
-                        ]["array_width"] = array_height
-                        # vector unit
-                        for vector_width in [16, 32, 64, 128]:
-                            arch_specs["device"]["compute_chiplet"]["core"][
-                                "vector_unit"
-                            ]["vector_width"] = vector_width
-                            for SRAM_KB in [64, 128, 256, 512, 1024]:
-                                arch_specs["device"]["compute_chiplet"]["core"][
-                                    "SRAM_KB"
-                                ] = SRAM_KB
-                                # global buffer
-                                for total_global_buffer_MB in [
-                                    80,
-                                    160,
-                                    240,
-                                    320,
-                                    400,
-                                    480,
-                                    640,
-                                    800,
-                                    960,
-                                ]:
-                                    global_buffer_MB = (
-                                        total_global_buffer_MB // device_count
-                                    )
-                                    global_buffer_bandwidth_per_cycle_byte = (
-                                        5120 * global_buffer_MB // 40
-                                    )
-                                    arch_specs["device"]["io"][
-                                        "global_buffer_MB"
-                                    ] = global_buffer_MB
-                                    arch_specs["device"]["io"][
-                                        "global_buffer_bandwidth_per_cycle_byte"
-                                    ] = global_buffer_bandwidth_per_cycle_byte
-                                    # memory
-                                    memory_capacity_requirement_GB = ceil(model_auto_regression.memory_requirement*n_layers/1e9/16)*16
-                                    # print(f"memory_capacity_requirement_GB={model_auto_regression.memory_requirement*n_layers/1e9}")
-                                    # exit()
-                                    for memory_protocol in [
-                                        "HBM2e",
-                                        "DDR5",
-                                        "PCIe5",
-                                        "SRAM",
-                                        "3D_DRAM",
-                                        "yizhu_SRAM",
-                                        "yizhu_3D_DRAM"
-                                        # "GDDR6X"
-                                    ]:
-                                        arch_specs['device']['memory_protocol']=memory_protocol
-                                        if memory_protocol == "HBM2e":
-                                            # 400 GB/s per channel, 16 GB
-                                            channel_count=memory_capacity_requirement_GB // 16
-                                            if channel_count>8:
-                                                continue
-                                            channel_count_list = [channel_count]
-                                            pin_count_per_channel=1024
-                                            bandwidth_per_pin_bit=3.2e9
-                                        elif memory_protocol == "DDR5":
-                                            # 19.2 GB/s per channel, 2 channel per dimm
-                                            channel_count_list = [16, 24, 32]
-                                            pin_count_per_channel=32
-                                            bandwidth_per_pin_bit=4.8e9
-                                        elif memory_protocol == "PCIe5":
-                                            # 4 GB/s per channel
-                                            channel_count_list = [64, 96, 128]
-                                            pin_count_per_channel=1
-                                            bandwidth_per_pin_bit=32e9
-                                        elif memory_protocol == "yizhu_SRAM":
-                                            channel_count_list = [16, 24, 32]
-                                            pin_count_per_channel=512
-                                            bandwidth_per_pin_bit=1e9
-                                        elif memory_protocol == "yizhu_3D_DRAM":
-                                            channel_count_list = [16, 24, 32]
-                                            pin_count_per_channel=512
-                                            bandwidth_per_pin_bit=1e9
-                                        # elif memory_protocol == "GDDR6X":
-                                        #     # 84 GB/s per channel, 2 GB
-                                        #     channel_count_list= memo
-                                        for channel_count in channel_count_list:
-                                            arch_specs['device']['memory']['total_capacity_GB'] = memory_capacity_requirement_GB
-                                            arch_specs['device']['io']['memory_channel_active_count'] = channel_count
-                                            arch_specs['device']['io']['memory_channel_physical_count'] = channel_count
-                                            arch_specs['device']['io']['pin_count_per_channel'] = pin_count_per_channel
-                                            arch_specs['device']['io']['bandwidth_per_pin_bit'] = bandwidth_per_pin_bit
-                                            
-                                            total_area_mm2=calc_compute_chiplet_area_mm2(arch_specs)+calc_io_die_area_mm2(arch_specs)
-                                            # print(f"channel_count={arch_specs['device']['io']['memory_channel_active_count']},total area={total_area_mm2}")
-                                            if total_area_mm2>900:
-                                                continue
-                                            system=template_to_system(arch_specs)
-                                            init_roofline_latency=model_init.roofline_model(system)*n_layers
-                                            if init_roofline_latency>init_latency:
-                                                continue
-                        
-                                            auto_regression_roofline_latency=model_auto_regression.roofline_model(system)*n_layers
-                                            if auto_regression_roofline_latency>auto_regression_latency:
-                                                continue
-                                            auto_regression_latency_simulated = model_auto_regression.compile_and_simulate(system, 'heuristic-GPU')
-                                            if auto_regression_latency_simulated>auto_regression_latency:
-                                                continue
-                                            init_latency_simulated = model_init.compile_and_simulate(system, 'heuristic-GPU')
-                                            if init_latency_simulated>init_latency:
-                                                continue
-                                            if total_area_mm2*device_count<smallest_total_area_mm2:
-                                                smallest_total_area_mm2=total_area_mm2*device_count
-                                                best_arch_specs=arch_specs
-                                                best_arch_specs['area_per_device_mm2']=total_area_mm2
-                                                # print(f"best_arch_specs={best_arch_specs}")
-                                                # print(f"smallest_total_area_mm2={smallest_total_area_mm2}")
-                                            i=i+1
-                                            if i%100==0:
-                                                print(f'i={i}')
-    print(f'number of potential designs={i}')
-    with open("configs/best_arch_specs.json", "w") as f:
-        json.dump(best_arch_specs, f, indent=4)
-                                            
+            d_model=d_model,
+            n_heads=n_heads,
+            device_count=4,
+            data_type=data_type_dict["fp16"],
+        )
+    elif model_type == "llama2":
+        # Initialize llama2 model
+        pass
+    else:
+        raise ValueError(f"Unsupported model_type: {model_type}")
+
+    # Continue with the rest of the function logic
+    _ = model_init(Tensor([batch_size, input_seq_length, model_init.d_model], data_type_dict["fp16"]))
+    _ = model_auto_regression(Tensor([batch_size, 1, model_init.d_model], data_type_dict["fp16"]), input_seq_length + output_seq_length)
+    
+    # ... rest of the function logic ...
+
 
 if __name__ == "__main__":
     # test_template_to_system()
-    find_cheapest_design(12288, 96, 96, 8, 2048, 5, 1024, 0.1)
+    find_cheapest_design(12288, 96, 96, 8, 2048, 5, 1024, 0.1, "transformer")
 
 

@@ -16,6 +16,10 @@ from software_model.transformer import (
     TransformerBlockInitComputationTP,
     TransformerBlockAutoRegressionTP,
 )
+from software_model.llama2 import(
+    Llama2BlockInitComputationTP,
+    Llama2BlockAutoRegressionTP,
+)
 from software_model.utils import data_type_dict, Tensor
 from cost_model.cost_model import calc_compute_chiplet_area_mm2, calc_io_die_area_mm2
 from math import ceil
@@ -174,7 +178,8 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
     init_latency,
     output_seq_length,
     auto_regression_latency,
-    config_path
+    config_path,
+    model_type
     
 ):
     i=0
@@ -184,19 +189,36 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
     # arch_specs = read_architecture_template("configs/G100.json")
     arch_specs = read_architecture_template(config_path)
     for device_count in [4, 8, 12, 16]:
-        model_init = TransformerBlockInitComputationTP(
-                d_model=12288,
-                n_heads=96,
-                device_count=device_count,
-                data_type=data_type_dict["fp16"],
-            )
-        model_auto_regression = TransformerBlockAutoRegressionTP(
-                d_model=12288,
-                n_heads=96,
-                device_count=device_count,
-                data_type=data_type_dict["fp16"],)
-        _ = model_init(Tensor([batch_size, input_seq_length, model_init.d_model], data_type_dict["fp16"]))
-        _ = model_auto_regression(Tensor([batch_size, 1, model_init.d_model],data_type_dict["fp16"]), input_seq_length+output_seq_length)
+        if model_type == 'transformer':
+            model_init = TransformerBlockInitComputationTP(
+                    d_model=12288,
+                    n_heads=96,
+                    device_count=device_count,
+                    data_type=data_type_dict["fp16"],
+                )
+            model_auto_regression = TransformerBlockAutoRegressionTP(
+                    d_model=12288,
+                    n_heads=96,
+                    device_count=device_count,
+                    data_type=data_type_dict["fp16"],)
+        elif model_type == 'llama2':
+            model_init = Llama2BlockInitComputationTP(
+                    d_model=12288,
+                    n_heads=96,
+                    device_count=device_count,
+                    data_type=data_type_dict["fp16"],
+                )
+            model_auto_regression = Llama2BlockAutoRegressionTP(
+                    d_model=12288,
+                    n_heads=96,
+                    device_count=device_count,
+                    data_type=data_type_dict["fp16"],)
+        if model_type == 'transformer':
+            _ = model_init(Tensor([batch_size, input_seq_length, model_init.d_model], data_type_dict["fp16"]))
+            _ = model_auto_regression(Tensor([batch_size, 1, model_init.d_model],data_type_dict["fp16"]), input_seq_length+output_seq_length)
+        elif model_type == 'llama2':
+            _ = model_init(Tensor([batch_size, 1, model_init.d_model], data_type_dict["fp16"]))
+            _ = model_auto_regression(Tensor([batch_size, 1, model_init.d_model],data_type_dict["fp16"]), input_seq_length+output_seq_length)
         arch_specs["device_count"] = device_count
         if device_count <= 4:
             topology = "FC"
@@ -341,6 +363,9 @@ if __name__ == "__main__":
     parser.add_argument("--config_type", type=str, choices=['g100', 'ga100', 'ga102_template', 'generate_template', 'G100', 'GA100', 'latency_design', 'mi210', 'template'], 
                        default='g100',
                        help="Choose config type: g100 or ga100")
+    parser.add_argument("--model_type", type=str, choices=['transformer', 'llama2'],
+                    default='transformer',
+                    help="Choose model type: transformer or llama2")
     args = parser.parse_args()
     
     # 根据选择设置配置路径
@@ -357,7 +382,8 @@ if __name__ == "__main__":
 
     }[args.config_type]
     
-    find_cheapest_design(12288, 96, 96, 8, 2048, 5, 1024, 0.1, config_path)
+    
+    find_cheapest_design(12288, 96, 96, 8, 2048, 5, 1024, 0.1, config_path, args.model_type)
 
 
 
