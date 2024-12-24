@@ -259,7 +259,9 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
                                         "DDR5",
                                         "PCIe5",
                                         "SRAM",
-                                        "3D_DRAM"
+                                        "3D_DRAM",
+                                        "yizhu_SRAM",
+                                        "yizhu_3D_DRAM"
                                         # "GDDR6X"
                                     ]:
                                         arch_specs['device']['memory_protocol']=memory_protocol

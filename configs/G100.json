@@ -37,7 +37,8 @@
                     "int32_count": 0,
                     "fp16_count": 64,
                     "fp32_count": 28,
-                    "fp64_count": 0
+                    "fp64_count": 0,
+                    "fp8_count": 0
                 },
                 "register_file": {
                     "num_reg_files": 1,

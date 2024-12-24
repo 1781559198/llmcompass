@@ -1,3 +1,4 @@
+import argparse
 import json, re
 from hardware_model.compute_module import (
     VectorUnit,
@@ -173,12 +174,15 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
     init_latency,
     output_seq_length,
     auto_regression_latency,
+    config_path
     
 ):
     i=0
     smallest_total_area_mm2=float('inf')
     best_arch_specs=None
-    arch_specs = read_architecture_template("configs/template.json")
+    #arch_specs = read_architecture_template("configs/GA100.json")
+    # arch_specs = read_architecture_template("configs/G100.json")
+    arch_specs = read_architecture_template(config_path)
     for device_count in [4, 8, 12, 16]:
         model_init = TransformerBlockInitComputationTP(
                 d_model=12288,
@@ -258,8 +262,8 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
                                         "HBM2e",
                                         "DDR5",
                                         "PCIe5",
-                                        "SRAM",
-                                        "3D_DRAM"
+                                        "yizhu_SRAM",
+                                        "yizhu_3D_DRAM"
                                         # "GDDR6X"
                                     ]:
                                         arch_specs['device']['memory_protocol']=memory_protocol
@@ -333,6 +337,27 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
 
 if __name__ == "__main__":
     # test_template_to_system()
-    find_cheapest_design(12288, 96, 96, 8, 2048, 5, 1024, 0.1)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config_type", type=str, choices=['g100', 'ga100', 'ga102_template', 'generate_template', 'G100', 'GA100', 'latency_design', 'mi210', 'template'], 
+                       default='g100',
+                       help="Choose config type: g100 or ga100")
+    args = parser.parse_args()
+    
+    # 根据选择设置配置路径
+    config_path = {
+        'g100': "configs/G100.json",
+        'ga100': "configs/GA100.json",
+        'ga102_template': "configs/GA102_template.json",
+        'generate_template': "configs/generate_template.json",
+        'G100': "configs/G100.json",
+        'GA100': "configs/GA100.json",
+        'latency_design': "configs/latency_design.json",
+        'mi210': "configs/mi210.json",
+        'template': "configs/template.json",
+
+    }[args.config_type]
+    
+    find_cheapest_design(12288, 96, 96, 8, 2048, 5, 1024, 0.1, config_path)
+
 
 

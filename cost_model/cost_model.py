@@ -7,7 +7,7 @@ import math
 # import supply_chain.supply_chain_model as scm
 import cost_model.supply_chain.supply_chain_model as scm
 
-# lots of parameters required for calculating silicon die area cost
+# lots of parameters required for calculating silicon die area
 
 # these are in terms of million transistors per mm2
 transistor_density_7nm = scm.transistor_density_arr[scm.PN_7_INDEX]
@@ -32,6 +32,7 @@ cache_area_efficiency_arr = [0.076, 0.142, 0.247, 0.393, 0.559, \
 fpu64_transistor_count = 685300
 fpu32_transistor_count = fpu64_transistor_count * ((23 / 52) ** 2)
 fpu16_transistor_count = fpu64_transistor_count * ((10 / 52) ** 2)
+fpu8_transistor_count = fpu64_transistor_count * ((5 / 52) ** 2)
 
 int32_transistor_count = 177690
 
@@ -95,16 +96,19 @@ def calc_systolic_array_area_mm2(dimension_x, dimension_y, bitwidth, transistor_
         total_transistor_count = fpu32_transistor_count * dimension_x * dimension_y
     elif bitwidth == 'fp16':
         total_transistor_count = fpu16_transistor_count * dimension_x * dimension_y
+    elif bitwidth == 'fp8':
+        total_transistor_count = fpu8_transistor_count * dimension_x * dimension_y
 
     return total_transistor_count / 1e6 / transistor_density_mil_mm2
 
 # vector width corresponds to number of FPUs you have
-def calc_vector_area_mm2(int32_count, fp16_count, fp32_count, fp64_count, transistor_density_mil_mm2):
+def calc_vector_area_mm2(int32_count, fp16_count, fp32_count, fp64_count, fp8_count, transistor_density_mil_mm2):
     total_transistor_count = 0
     total_transistor_count += int32_count * int32_transistor_count
     total_transistor_count += fp16_count * fpu16_transistor_count
     total_transistor_count += fp32_count * fpu32_transistor_count
     total_transistor_count += fp64_count * fpu64_transistor_count
+    total_transistor_count += fp8_count * fpu8_transistor_count
     
     return total_transistor_count / 1e6 / transistor_density_mil_mm2
 
@@ -211,7 +215,8 @@ def calc_compute_chiplet_area_mm2(configs_dict, verbose=False):
     vector_int32_count = configs_dict['device']['compute_chiplet']['core']['vector_unit']['int32_count']
     vector_fp16_count = configs_dict['device']['compute_chiplet']['core']['vector_unit']['fp16_count']
     vector_fp32_count = configs_dict['device']['compute_chiplet']['core']['vector_unit']['fp32_count']
-    vector_fp64_count = configs_dict['device']['compute_chiplet']['core']['vector_unit']['fp64_count']
+    vector_fp64_count = configs_dict['device']['compute_chiplet']['core']['vector_unit']['fp64_count']  
+    vector_fp8_count = 0 if 'fp8_count' not in configs_dict['device']['compute_chiplet']['core']['vector_unit'] else configs_dict['device']['compute_chiplet']['core']['vector_unit']['fp8_count']# add
     sa_dim_x = configs_dict['device']['compute_chiplet']['core']['systolic_array']['array_width']
     sa_dim_y = configs_dict['device']['compute_chiplet']['core']['systolic_array']['array_height']
     sa_bitwidth = configs_dict['device']['compute_chiplet']['core']['systolic_array']['data_type']
@@ -231,7 +236,7 @@ def calc_compute_chiplet_area_mm2(configs_dict, verbose=False):
     per_sublane_area_mm2 += (vector_width * per_sublane_control_area_mm2)
     control_logic_area = per_sublane_area_mm2 * sublane_count
 
-    per_lane_vector_area = calc_vector_area_mm2(vector_int32_count, vector_fp16_count, vector_fp32_count, vector_fp64_count, transistor_density_mil_mm2)
+    per_lane_vector_area = calc_vector_area_mm2(vector_int32_count, vector_fp16_count, vector_fp32_count, vector_fp64_count, vector_fp8_count, transistor_density_mil_mm2)
     per_sublane_area_mm2 += per_lane_vector_area
 
     per_lane_sa_area = calc_systolic_array_area_mm2(sa_dim_x, sa_dim_y, sa_bitwidth, transistor_density_mil_mm2)
