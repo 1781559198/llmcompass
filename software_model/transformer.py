@@ -168,7 +168,7 @@ class TransformerBlockInitComputationTP(Operator):
             allreduce_latency = self.allreduce_mha.simulate(interconnect)
             allreduce_total_latency = allreduce_latency * 2
         else:
-            allreduce_total_latency = 0
+            allreduce_latency = 0
             allreduce_total_latency = 0
 
         # others
@@ -717,6 +717,14 @@ class TransformerBlockAutoRegressionTP(Operator):
             + allreduce_total_latency
         )
         return self.latency_on_gpu
+
+    def get_roofline_breakdown(self):
+        # 返回roofline分析的详细数据
+        return self.roofline_breakdown if hasattr(self, 'roofline_breakdown') else []
+        
+    def get_performance_metrics(self):
+        # 返回总体性能指标
+        return self.performance_metrics if hasattr(self, 'performance_metrics') else {}
 
 
 class LLMInitComputationTP:

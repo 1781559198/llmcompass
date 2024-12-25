@@ -236,7 +236,7 @@ class Llama2BlockInitComputationTP(Operator):
             allreduce_latency = self.allreduce_mha.simulate(interconnect)
             allreduce_total_latency = allreduce_latency * 2
         else:
-            allreduce_total_latency = 0
+            allreduce_latency = 0
             allreduce_total_latency = 0
 
         # others
