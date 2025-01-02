@@ -24,7 +24,7 @@ _ = model_auto_regression(
 
 print("Starting simulation...")
 auto_regression_latency_simulated = model_auto_regression.compile_and_simulate(
-	system, "heuristic-GPU"
+	system, "yizhu-g100"
 )
 
 # auto_regression_latency_simulated = model_auto_regression.run_on_gpu(

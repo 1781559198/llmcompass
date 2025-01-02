@@ -101,7 +101,7 @@ class RoPE(Operator):
         )
         l2_tile_M = min(l2_tile_M, M)
 
-        if compile_mode in ["heuristic-GPU", "heuristic-our-throughput"]:
+        if compile_mode in ["heuristic-GPU", "heuristic-our-throughput", "yizhu-g100"]:
             l1_tile_N = N
             l1_tile_M = (
                 pcb_module.compute_module.core.SRAM_size

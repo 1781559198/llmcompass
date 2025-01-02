@@ -290,8 +290,8 @@ def calc_io_die_area_mm2(config_dict, verbose=False):
     global_buffer_area = io_die_area_mm2
 
     # mem tech for communicating to off chip memory
-    mem_phy_area = calc_mem_phy_area_mm2(mem_tech, num_mem_tech_units)
-    mem_controller_area = calc_mem_controller_area_mm2(mem_tech, num_mem_tech_units, transistor_density_mil_mm2)
+    mem_phy_area = calc_mem_phy_area_mm2(mem_tech, num_mem_tech_units)# 缺少参数
+    mem_controller_area = calc_mem_controller_area_mm2(mem_tech, num_mem_tech_units, transistor_density_mil_mm2)# 缺少参数
     io_die_area_mm2 += mem_phy_area
     io_die_area_mm2 += mem_controller_area
 

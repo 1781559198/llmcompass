@@ -242,6 +242,7 @@ class Llama2BlockInitComputationTP(Operator):
         # others
 
         # print
+        '''
         print("Roofline breakdown:")
         print(  
             f"{qkv_latency}\n{q_mul_k_latency}\n{a_mul_v_latency}\n{h_matmul0_latency}\n{h1_matmul1_latency}\n{h2_matmul2_latency}\n{rope_latency}\n{softmax_latency}\n{add_latency}\n{add_latency}\n{add_latency}\n{rmsnorm_latency}\n{rmsnorm_latency}\n{rmsnorm_latency}\n{silu_latency}\n{element_wise_multiply_latency}\n{allreduce_latency}\n{allreduce_latency}\n"
@@ -250,7 +251,7 @@ class Llama2BlockInitComputationTP(Operator):
         print("total:")
         print(
             f"{matmul_total_latency}\n{normlization_total_latency}\n{silu_latency}\n{element_wise_multiply_latency}\n{allreduce_total_latency}\n"
-        )
+        )'''
         self.roofline_latency = (
             matmul_total_latency
             + normlization_total_latency
@@ -265,32 +266,26 @@ class Llama2BlockInitComputationTP(Operator):
         interconnect = system.interconnect
 
         # matmul
-        print("simulating qkv")
         qkv_latency = 3 * (
             self.Q_proj.compile_and_simulate(device, compile_mode)
             + device.compute_module.overhead.matmul
         )
-        print("simulating q_mul_k")
         q_mul_k_latency = (
             self.Q_mul_K.compile_and_simulate(device, compile_mode)
             + device.compute_module.overhead.matmul
         )
-        print("simulating a_mul_v")
         a_mul_v_latency = (
             self.A_mul_V.compile_and_simulate(device, compile_mode)
             + device.compute_module.overhead.matmul
         )
-        print("simulating h_matmul0")
         h_matmul0_latency = (
             self.H_matmul0.compile_and_simulate(device, compile_mode)
             + device.compute_module.overhead.matmul
         )
-        print("simulating h1_matmul1")
         h1_matmul1_latency = (
             self.H_matmul1.compile_and_simulate(device, compile_mode)
             + device.compute_module.overhead.matmul
         )
-        print("simulating h2_matmul2")
         h2_matmul2_latency = (
             self.H_matmul2.compile_and_simulate(device, compile_mode)
             + device.compute_module.overhead.matmul
@@ -299,7 +294,6 @@ class Llama2BlockInitComputationTP(Operator):
             self.causal_mask.compile_and_simulate(device, compile_mode)
             + device.compute_module.overhead.casual_mask
         )
-        print("finish matmul simulation")
 
         matmul_total_latency = (
             qkv_latency
@@ -432,6 +426,7 @@ class Llama2BlockInitComputationTP(Operator):
         # others
 
         # print
+        '''
         print("breakdown:")
         print(
             f"{qkv_latency}\n{q_mul_k_latency}\n{a_mul_v_latency}\n{h_matmul0_latency}\n{h1_matmul1_latency}\n{h2_matmul2_latency}\n{rope_latency}\n{softmax_latency}\n{add_latency}\n{add_latency}\n{add_latency}\n{rmsnorm_latency}\n{rmsnorm_latency}\n{rmsnorm_latency}\n{silu_latency}\n{element_wise_multiply_latency}\n{allreduce_total_latency}\n"
@@ -439,7 +434,7 @@ class Llama2BlockInitComputationTP(Operator):
         print("total:")
         print(
             f"{qkv_latency}\n{q_mul_k_latency}\n{a_mul_v_latency}\n{h_matmul0_latency}\n{h1_matmul1_latency}\n{h2_matmul2_latency}\n{rope_latency}\n{softmax_latency}\n{add_latency}\n{add_latency}\n{add_latency}\n{rmsnorm_latency}\n{rmsnorm_latency}\n{rmsnorm_latency}\n{silu_latency}\n{element_wise_multiply_latency}\n{allreduce_total_latency}\n"
-        )
+        )'''
         self.latency_on_gpu = (
             matmul_total_latency
             + normlization_total_latency
@@ -697,6 +692,7 @@ class Llama2BlockAutoRegressionTP(Operator):
         # others
 
         # print
+        '''
         print("Roofline breakdown:")
         print(
             f"{qkv_latency}\n{q_mul_k_latency}\n{a_mul_v_latency}\n{h_matmul0_latency}\n{h1_matmul1_latency}\n{h2_matmul2_latency}\n{rope_latency}\n{softmax_latency}\n{add_latency}\n{add_latency}\n{add_latency}\n{rmsnorm_latency}\n{rmsnorm_latency}\n{rmsnorm_latency}\n{silu_latency}\n{element_wise_multiply_latency}\n{allreduce_latency}\n{allreduce_latency}\n"
@@ -704,7 +700,7 @@ class Llama2BlockAutoRegressionTP(Operator):
         print("total:")
         print(
             f"{matmul_total_latency}\n{normlization_total_latency}\n{silu_latency}\n{allreduce_total_latency}\n"
-        )
+        )'''
         self.roofline_latency = (
             matmul_total_latency
             + normlization_total_latency

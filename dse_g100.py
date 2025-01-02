@@ -1,6 +1,10 @@
 import argparse
 import json, re
 import datetime
+import time
+import pandas as pd
+import os
+from threading import Timer
 from hardware_model.compute_module import (
     VectorUnit,
     SystolicArray,
@@ -139,8 +143,8 @@ def template_to_system(arch_specs):
 
 
 def test_template_to_system():
-    arch_specs, is_yizhu_g100 = read_architecture_template("configs/template.json")
-    A100_system = template_to_system(arch_specs, is_yizhu_g100)
+    arch_specs = read_architecture_template("configs/template.json")
+    A100_system = template_to_system(arch_specs)
     bs = 8
     s = 2048
     model = TransformerBlockInitComputationTP(
@@ -151,6 +155,29 @@ def test_template_to_system():
     )
     _ = model(Tensor([bs, s, 12288], data_type_dict["fp16"]))
     model.roofline_model(A100_system)
+
+def export_to_csv(latency_data, output_dir="output"):
+   """将延迟数据导出到CSV文件"""
+   os.makedirs(output_dir, exist_ok=True)
+   df = pd.DataFrame(latency_data)
+   timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+   filename = os.path.join(output_dir, "latency_data.csv")
+   if os.path.exists(filename):
+       # 读取现有数据
+       existing_df = pd.read_csv(filename)
+       # 合并新旧数据
+       df = pd.concat([existing_df, df], ignore_index=True)
+   df.to_csv(filename, index=False)
+   print(f"Data exported to {filename}")
+
+def periodic_export(latency_data, output_dir="output"):
+   """每30秒导出一次数据"""
+   if latency_data['init_roofline']:  # 只在有数据时导出
+       export_to_csv(latency_data, output_dir)
+       # 清空当前数据，避免重复导出
+       for key in latency_data:
+           latency_data[key] = []
+   Timer(30.0, periodic_export, args=[latency_data, output_dir]).start()
 
 
 def find_cheapest_design(# 搜索计算硬件架构的最佳设计
@@ -163,13 +190,33 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
     output_seq_length,
     auto_regression_latency,
     config_path,
-    model_type
-    
+    model_type,
+    output_dir="output"
 ):
     i=0
+
+    # 计数
+    # filtered_by_area = 0
+    # filtered_by_init_roofline = 0
+    # filtered_by_auto_roofline = 0
+    # filtered_by_auto_simulated = 0
+    # filtered_by_init_simulated = 0
+    # 储存数据
+    latency_data = {
+       'init_roofline': [],
+       'auto_regression_roofline': [],
+       'init_simulated': [],
+       'auto_regression_simulated': [],
+       'total_area': [],
+       'timestamp': []
+   }
+    # 启动定期导出
+    periodic_export(latency_data, output_dir)
+
     smallest_total_area_mm2=float('inf')
     best_arch_specs=None
     arch_specs = read_architecture_template(config_path)
+    # 参数设置
     if model_type == 'transformer':
         model_init = TransformerBlockInitComputationTP(
                 d_model=12288,
@@ -194,12 +241,13 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
                 n_heads=96,
                 device_count=1,
                 data_type=data_type_dict["fp16"],)
-        if model_type == 'transformer':
-            _ = model_init(Tensor([batch_size, input_seq_length, model_init.d_model], data_type_dict["fp16"]))
-            _ = model_auto_regression(Tensor([batch_size, 1, model_init.d_model],data_type_dict["fp16"]), input_seq_length+output_seq_length)
-        elif model_type == 'llama2':
-            _ = model_init(Tensor([batch_size, 1, model_init.d_model], data_type_dict["fp16"]))
-            _ = model_auto_regression(Tensor([batch_size, 1, model_init.d_model],data_type_dict["fp16"]), input_seq_length+output_seq_length)
+    if model_type == 'transformer':
+        _ = model_init(Tensor([batch_size, input_seq_length, model_init.d_model], data_type_dict["fp16"]))
+        _ = model_auto_regression(Tensor([batch_size, 1, model_init.d_model],data_type_dict["fp16"]), input_seq_length+output_seq_length)
+    elif model_type == 'llama2':
+        _ = model_init(Tensor([batch_size, 1, model_init.d_model], data_type_dict["fp16"]))
+        _ = model_auto_regression(Tensor([batch_size, 1, model_init.d_model],data_type_dict["fp16"]), input_seq_length+output_seq_length)
+        
         # device
         for core_count in [32, 64, 128, 256]:
             arch_specs["device"]["compute_chiplet"]["core_count"] = core_count
@@ -238,15 +286,9 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
                                 960,
                             ]:
                                 global_buffer_MB = total_global_buffer_MB
-                                global_buffer_bandwidth_per_cycle_byte = (
-                                    5120 * global_buffer_MB // 40
-                                )
-                                arch_specs["device"]["io"][
-                                    "global_buffer_MB"
-                                ] = global_buffer_MB
-                                arch_specs["device"]["io"][
-                                    "global_buffer_bandwidth_per_cycle_byte"
-                                ] = global_buffer_bandwidth_per_cycle_byte
+                                global_buffer_bandwidth_per_cycle_byte = (5120 * global_buffer_MB // 40)
+                                arch_specs["device"]["io"]["global_buffer_MB"] = global_buffer_MB
+                                arch_specs["device"]["io"]["global_buffer_bandwidth_per_cycle_byte"] = global_buffer_bandwidth_per_cycle_byte
                                 # memory
                                 memory_capacity_requirement_GB = ceil(model_auto_regression.memory_requirement*n_layers/1e9/16)*16
                                 # print(f"memory_capacity_requirement_GB={model_auto_regression.memory_requirement*n_layers/1e9}")
@@ -278,23 +320,48 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
 
                                         
                                         total_area_mm2=calc_compute_chiplet_area_mm2(arch_specs)+calc_io_die_area_mm2(arch_specs)
-                                        # print(f"channel_count={arch_specs['device']['io']['memory_channel_active_count']},total area={total_area_mm2}")
+                                        print("================================================")
                                         if total_area_mm2>900:
+                                            print(f"Filtered out by area constraint: {total_area_mm2}mm²")
+                                            # filtered_by_area=filtered_by_area+1
                                             continue
                                         system=template_to_system(arch_specs)
+                                        print("start to calculate InitComputation roofline latency")
                                         init_roofline_latency=model_init.roofline_model(system)*n_layers
-                                        if init_roofline_latency>init_latency:
+                                        if init_roofline_latency>init_latency:# 5
+                                            print(f"Filtered out by InitComputation latency constraint: {init_roofline_latency}s")
+                                            # filtered_by_init_roofline=filtered_by_init_roofline+1
                                             continue
-                    
+                                        print("start to calculate AutoRegression roofline latency")
                                         auto_regression_roofline_latency=model_auto_regression.roofline_model(system)*n_layers
-                                        if auto_regression_roofline_latency>auto_regression_latency:
+                                        if auto_regression_roofline_latency>auto_regression_latency:# 1
+                                            print(f"Filtered out by AutoRegression latency constraint: {auto_regression_roofline_latency}s")
+                                            # filtered_by_auto_roofline=filtered_by_auto_roofline+1
                                             continue
-                                        auto_regression_latency_simulated = model_auto_regression.compile_and_simulate(system, 'heuristic-GPU')
-                                        if auto_regression_latency_simulated>auto_regression_latency:
+
+                                        print("start to calculate InitComputation latency simulated")
+                                        init_latency_simulated = model_init.compile_and_simulate(system, 'yizhu-g100')
+                                        if init_latency_simulated>init_latency:# 5
+                                            print(f"Filtered out by InitComputation latency constraint: {init_latency_simulated}s")
+                                            # filtered_by_init_simulated=filtered_by_init_simulated+1
                                             continue
-                                        init_latency_simulated = model_init.compile_and_simulate(system, 'heuristic-GPU')
-                                        if init_latency_simulated>init_latency:
+                                        print("start to calculate AutoRegression latency simulated")
+                                        auto_regression_latency_simulated = model_auto_regression.compile_and_simulate(system, 'yizhu-g100')
+                                        if auto_regression_latency_simulated>auto_regression_latency:# 1
+                                            print(f"Filtered out by AutoRegression latency constraint: {auto_regression_latency_simulated}s")
+                                            # filtered_by_auto_simulated=filtered_by_auto_simulated+1
                                             continue
+
+                                        # 储存数据
+                                        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                        latency_data['init_roofline'].append(init_roofline_latency)
+                                        latency_data['auto_regression_roofline'].append(auto_regression_roofline_latency)
+                                        latency_data['init_simulated'].append(init_latency_simulated)
+                                        latency_data['auto_regression_simulated'].append(auto_regression_latency_simulated)
+                                        latency_data['total_area'].append(total_area_mm2)
+                                        latency_data['timestamp'].append(current_time)
+                                        print("================================================")
+
                                         if total_area_mm2<smallest_total_area_mm2:
                                             smallest_total_area_mm2=total_area_mm2
                                             best_arch_specs=arch_specs
@@ -305,6 +372,12 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
                                         if i%100==0:
                                             print(f'i={i}')
     print(f'number of potential designs={i}')
+    # 计数
+    # print(f'filtered_by_area={filtered_by_area}')
+    # print(f'filtered_by_init_roofline={filtered_by_init_roofline}')
+    # print(f'filtered_by_auto_roofline={filtered_by_auto_roofline}')
+    # print(f'filtered_by_auto_simulated={filtered_by_auto_simulated}')
+    # print(f'filtered_by_init_simulated={filtered_by_init_simulated}')
     with open("configs/best_arch_specs.json", "w") as f:
         json.dump(best_arch_specs, f, indent=4)
                                             
@@ -335,7 +408,9 @@ if __name__ == "__main__":
     }[args.config_type]
     
     
-    find_cheapest_design(12288, 96, 96, 8, 2048, 5, 1024, 0.1, config_path, args.model_type)
+    find_cheapest_design(12288,  96,      96,       8,          2048,             5,            1024,              1,                   config_path, args.model_type, output_dir = "results")
+    #                   d_model, n_heads, n_layers, batch_size, input_seq_length, init_latency, output_seq_length, auto_regression_latency, config_path, model_type 
+    
 
 
 

@@ -90,7 +90,7 @@ class LayerNorm(Operator):
             pcb_module.compute_module.l2_size // (l2_tile_N * data_type.word_size) // 2
         )
         l2_tile_M = min(l2_tile_M, M)
-        if compile_mode == "heuristic-GPU" or compile_mode == "heuristic-our-throughput":
+        if compile_mode == "heuristic-GPU" or compile_mode == "heuristic-our-throughput" or compile_mode == "yizhu-g100":
             # if N <= 1024:
             l1_tile_N = N
             l1_tile_M = (
