@@ -1,76 +1,85 @@
-
 {
-    "name": "NVIDIA A100(80GB)x4",  /* 设备名称 */
-    "device_count": 4,  /* 设备数量 */
+    "name": "Yizhu G100",
+    "device_count": 1,
     "interconnect": {
         "link": {
-            "name": "NVLink3",  /* 互连名称 */
-            "bandwidth_per_direction_byte": 25e9,  /* 单向带宽（字节） */
-            "bandwidth_both_directions_byte": 50e9,  /* 双向带宽（字节） */
-            "latency_second": 8.92e-6,  /* 延迟（秒） */
-            "flit_size_byte": 16,  /* 传输单元大小（字节） */
-            "header_size_byte": 16,  /* 头部大小（字节） */
-            "max_payload_size_byte": 256  /* 最大有效载荷大小（字节） */
+            "name": "NVLink3",
+            "bandwidth_per_direction_byte": 32e9,
+            "bandwidth_both_directions_byte": 50e9,
+            "latency_second": 8.92e-6,
+            "flit_size_byte": 16,
+            "header_size_byte": 16,
+            "max_payload_size_byte": 256
         },
-        "link_count_per_device": 12,  /* 每个设备的链接数量 */
-        "topology": "FC"  /* 互连拓扑结构：全连接 */
+        "link_count_per_device": 12,
+        "topology": "FC"
     },
     "device": {
-        "frequency_Hz": 1410e6,  /* 设备频率（赫兹） */
-        "compute_chiplet_count": 1,  /* 计算芯片组数量 */
+        "frequency_Hz": 8e8,
+        "compute_chiplet_count": 1,
         "compute_chiplet": {
-            "physical_core_count": 128,  /* 物理核心数量 */
-            "core_count": 128,  /* 核心数量 */
-            "process_node": "7nm",  /* 制程工艺 */
+            "physical_core_count": 8,
+            "core_count": 32,
+            "process_node": "7nm",
             "core": {
-                "sublane_count": 4,  /* 子通道数量 */
-                "systolic_array": {
-                    "array_width": 16,  /* 矩阵阵列宽度 */
-                    "array_height": 16,  /* 矩阵阵列高度 */
-                    "data_type": "fp16",  /* 数据类型：半精度浮点数 */
-                    "mac_per_cycle": 1  /* 每周期乘加运算次数 */
+                "sublane_count": 4, vector_count
+                "single_tpe": true,
+                "systolic_array": { 
+                    "array_width": 64,
+                    "array_height": 64,
+                    "data_type": "fp8",
+                    "mac_per_cycle": 1
                 },
+                sublane_count # 子通道* vector_unit_specs["vector_width"]* vector_unit_specs["flop_per_cycle"] =total_vector_flops_per_cycle
                 "vector_unit": {
-                    "vector_width": 32,  /* 向量单元宽度 */
-                    "flop_per_cycle": 4,  /* 每周期浮点运算次数 */
-                    "data_type": "fp16",  /* 数据类型：半精度浮点数 */
-                    "int32_count": 16,  /* int32 算术逻辑单元数量 */
-                    "fp16_count": 0,  /* fp16 算术逻辑单元数量 */
-                    "fp32_count": 16,  /* fp32 算术逻辑单元数量 */
-                    "fp64_count": 8  /* fp64 算术逻辑单元数量 */
+                    "vector_width": 64,
+                    "flop_per_cycle": 8,
+                    "data_type": "fp16",
+                    "int32_count": 0,
+                    "fp16_count": 64,
+                    "fp32_count": 28,
+                    "fp64_count": 0,
+                    "fp8_count": 0
                 },
                 "register_file": {
-                    "num_reg_files": 1,  /* 寄存器文件数量 */
-                    "num_registers": 16384,  /* 寄存器数量 */
-                    "register_bitwidth": 32,  /* 寄存器位宽 */
-                    "num_rdwr_ports": 4  /* 读写端口数量 */
+                    "num_reg_files": 1,
+                    "num_registers": 16384,
+                    "register_bitwidth":32,
+                    "num_rdwr_ports":4
                 },
-                "SRAM_KB": 192  /* SRAM 大小（KB） */
+                "SRAM_KB": 128
             }
         },
-        "memory_protocol": "HBM2e",  /* 内存协议 */
+        "memory_protocol": "PCIe5",
         "_memory_protocol_list": [
             "HBM2e",
             "DDR4",
             "DDR5",
             "PCIe4",
             "PCIe5"
-        ],  /* 支持的内存协议列表 */
+        ],
         "io": {
-            "process_node": "7nm",  /* 制程工艺 */
-            "global_buffer_MB": 48,  /* 全局缓冲区大小（MB） */
-            "physical_global_buffer_MB": 48,  /* 物理全局缓冲区大小（MB） */
-            "global_buffer_bandwidth_per_cycle_byte": 5120,  /* 每周期全局缓冲区带宽（字节） */
-            "memory_channel_physical_count": 6,  /* 物理内存通道数量 */
-            "memory_channel_active_count": 5,  /* 活跃内存通道数量 */
-            "pin_count_per_channel": 1024,  /* 每通道引脚数量 */
-            "bandwidth_per_pin_bit": 3.2e9  /* 每引脚带宽（位） */
+            "process_node": "7nm",
+            "global_buffer_MB": 128,
+            "physical_global_buffer_MB": 224,#io_specs["global_buffer_MB"] * 1024 * 1024,
+            "global_buffer_bandwidth_per_cycle_byte": 8192,#l2_bandwidth_per_cycle
+            "memory_channel_physical_count": 8,
+            "memory_channel_active_count": 64, bandwidth
+            "pin_count_per_channel": 1024,
+            "bandwidth_per_pin_bit": 3.2e9
+        },
+        "io_3d_dram": {
+            "process_node": "7nm",
+            "global_buffer_MB": 17280, 
+            "physical_global_buffer_MB": 2048,
+            "global_buffer_bandwidth_per_cycle_byte": 8192,
+            "memory_channel_physical_count": 8,
+            "memory_channel_active_count": 64,
+            "pin_count_per_channel": 1024,
+            "bandwidth_per_pin_bit": 3.2e9
         },
         "memory": {
-            "total_capacity_GB": 80  /* 内存总容量（GB） */
+            "total_capacity_GB": 80
         }
-    }
+    }  
 }
-
-
-# 一个core里面只有一个tpe，但是有4个cu，所以通过single_tpe来判断是否有乘sublane_count

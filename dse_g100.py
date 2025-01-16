@@ -203,12 +203,37 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
     # filtered_by_init_simulated = 0
     # 储存数据
     latency_data = {
-       'init_roofline': [],
-       'auto_regression_roofline': [],
-       'init_simulated': [],
-       'auto_regression_simulated': [],
-       'total_area': [],
-       'timestamp': []
+        'init_roofline': [],
+        'auto_regression_roofline': [],
+        'init_simulated': [],
+        'auto_regression_simulated': [],
+        'total_area': [],
+        # 添加初始化计算的roofline细分指标
+        'init_roofline_matmul_total': [],
+        'init_roofline_normalization_total': [],
+        'init_roofline_silu': [],
+        'init_roofline_element_wise_multiply': [],
+        'init_roofline_allreduce_total': [],
+        # 添加自回归的roofline细分指标
+        'auto_roofline_matmul_total': [],
+        'auto_roofline_normalization_total': [],
+        'auto_roofline_silu': [],
+        'auto_roofline_element_wise_multiply': [],
+        'auto_roofline_allreduce_total': [],
+        # 添加初始化计算的细分指标
+        'init_matmul_total': [],
+        'init_normalization_total': [],
+        'init_silu': [], 
+        'init_element_wise_multiply': [],
+        'init_allreduce_total': [],
+        # 添加自回归的细分指标
+        'auto_matmul_total': [],
+        'auto_normalization_total': [],
+        'auto_silu': [],
+        'auto_element_wise_multiply': [],
+        'auto_allreduce_total': [],
+
+        'timestamp': []
    }
     # 启动定期导出
     periodic_export(latency_data, output_dir)
@@ -326,16 +351,18 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
                                             # filtered_by_area=filtered_by_area+1
                                             continue
                                         system=template_to_system(arch_specs)
+
                                         print("start to calculate InitComputation roofline latency")
                                         init_roofline_latency=model_init.roofline_model(system)*n_layers
                                         if init_roofline_latency>init_latency:# 5
-                                            print(f"Filtered out by InitComputation latency constraint: {init_roofline_latency}s")
+                                            print(f"Filtered out by InitComputation roofline latency constraint: {init_roofline_latency}s")
                                             # filtered_by_init_roofline=filtered_by_init_roofline+1
                                             continue
+
                                         print("start to calculate AutoRegression roofline latency")
                                         auto_regression_roofline_latency=model_auto_regression.roofline_model(system)*n_layers
                                         if auto_regression_roofline_latency>auto_regression_latency:# 1
-                                            print(f"Filtered out by AutoRegression latency constraint: {auto_regression_roofline_latency}s")
+                                            print(f"Filtered out by AutoRegression roofline latency constraint: {auto_regression_roofline_latency}s")
                                             # filtered_by_auto_roofline=filtered_by_auto_roofline+1
                                             continue
 
@@ -345,6 +372,7 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
                                             print(f"Filtered out by InitComputation latency constraint: {init_latency_simulated}s")
                                             # filtered_by_init_simulated=filtered_by_init_simulated+1
                                             continue
+
                                         print("start to calculate AutoRegression latency simulated")
                                         auto_regression_latency_simulated = model_auto_regression.compile_and_simulate(system, 'yizhu-g100')
                                         if auto_regression_latency_simulated>auto_regression_latency:# 1
@@ -360,6 +388,40 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
                                         latency_data['auto_regression_simulated'].append(auto_regression_latency_simulated)
                                         latency_data['total_area'].append(total_area_mm2)
                                         latency_data['timestamp'].append(current_time)
+
+                                        # 储存roofline模型的细分指标
+                                        latency_data['init_roofline_matmul_total'].append(model_init.roofline_matmul_total_latency)
+                                        latency_data['init_roofline_normalization_total'].append(model_init.roofline_normlization_total_latency)
+                                        latency_data['init_roofline_silu'].append(model_init.roofline_silu_latency)
+                                        latency_data['init_roofline_element_wise_multiply'].append(model_init.roofline_element_wise_multiply_latency)
+                                        latency_data['init_roofline_allreduce_total'].append(model_init.roofline_allreduce_total_latency)
+
+                                        
+                                        # 储存roofline模型的细分指标
+                                        latency_data['auto_roofline_matmul_total'].append(model_auto_regression.roofline_matmul_total_latency)
+                                        latency_data['auto_roofline_normalization_total'].append(model_auto_regression.roofline_normlization_total_latency)
+                                        latency_data['auto_roofline_silu'].append(model_auto_regression.roofline_silu_latency)
+                                        latency_data['auto_roofline_element_wise_multiply'].append(model_auto_regression.roofline_element_wise_multiply_latency)
+                                        latency_data['auto_roofline_allreduce_total'].append(model_auto_regression.roofline_allreduce_total_latency)
+
+
+                                        # 添加初始化计算的细分指标
+                                        latency_data['init_matmul_total'].append(model_init.matmul_total_latency)
+                                        latency_data['init_normalization_total'].append(model_init.normlization_total_latency)
+                                        latency_data['init_silu'].append(model_init.silu_latency)
+                                        latency_data['init_element_wise_multiply'].append(model_init.element_wise_multiply_latency)
+                                        latency_data['init_allreduce_total'].append(model_init.allreduce_total_latency)
+                                        
+
+                                        # 添加自回归的细分指标  
+                                        latency_data['auto_matmul_total'].append(model_auto_regression.matmul_total_latency)
+                                        latency_data['auto_normalization_total'].append(model_auto_regression.normlization_total_latency)
+                                        latency_data['auto_silu'].append(model_auto_regression.silu_latency)
+                                        latency_data['auto_element_wise_multiply'].append(model_auto_regression.element_wise_multiply_latency)
+                                        latency_data['auto_allreduce_total'].append(model_auto_regression.allreduce_total_latency)
+                                        
+                                        
+
                                         print("================================================")
 
                                         if total_area_mm2<smallest_total_area_mm2:

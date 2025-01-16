@@ -59,6 +59,7 @@ systolic_array_dict = {
     "TPUv3_bf16": SystolicArray(128, 128, 1, 2, 4, 128*128*1*2*4),
     "MI210_fp16": SystolicArray(16, 16, 0.5, 2, 2, 16*16*0.5*2*2),
     "TPUv3_new": SystolicArray(128, 128, 1, 2, 4, 128*128*1*2*4),
+    "G100_fp16": SystolicArray(64, 64, 1, 2, 2, 64*64*1*2*2),
 }
 
 class Core:

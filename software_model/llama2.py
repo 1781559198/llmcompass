@@ -241,6 +241,13 @@ class Llama2BlockInitComputationTP(Operator):
 
         # others
 
+        # 保存各个延迟指标作为类属性
+        self.roofline_matmul_total_latency = matmul_total_latency
+        self.roofline_normlization_total_latency = normlization_total_latency
+        self.roofline_silu_latency = silu_latency
+        self.roofline_element_wise_multiply_latency = element_wise_multiply_latency
+        self.roofline_allreduce_total_latency = allreduce_total_latency
+
         # print
         '''
         print("Roofline breakdown:")
@@ -353,6 +360,13 @@ class Llama2BlockInitComputationTP(Operator):
         # print(
         #     f"{matmul_total_latency}\n{normlization_total_latency}\n{gelu_latency}\n{allreduce_total_latency}\n"
         # )
+        # 保存各个延迟指标作为类属性
+        self.matmul_total_latency = matmul_total_latency
+        self.normlization_total_latency = normlization_total_latency
+        self.silu_latency = silu_latency
+        self.element_wise_multiply_latency = element_wise_multiply_latency
+        self.allreduce_total_latency = allreduce_total_latency
+
         self.latency = (
             matmul_total_latency
             + normlization_total_latency
@@ -691,6 +705,13 @@ class Llama2BlockAutoRegressionTP(Operator):
 
         # others
 
+        # 保存各个延迟指标作为类属性
+        self.roofline_matmul_total_latency = matmul_total_latency
+        self.roofline_normlization_total_latency = normlization_total_latency
+        self.roofline_silu_latency = silu_latency
+        self.roofline_element_wise_multiply_latency = element_wise_multiply_latency
+        self.roofline_allreduce_total_latency = allreduce_total_latency
+
         # print
         '''
         print("Roofline breakdown:")
@@ -811,6 +832,12 @@ class Llama2BlockAutoRegressionTP(Operator):
         # print(
         #     f"{matmul_total_latency}\n{normlization_total_latency}\n{gelu_latency}\n{allreduce_total_latency}\n"
         # )
+        # 保存各个延迟指标作为类属性
+        self.matmul_total_latency = matmul_total_latency
+        self.normlization_total_latency = normlization_total_latency
+        self.silu_latency = silu_latency
+        self.element_wise_multiply_latency = element_wise_multiply_latency
+        self.allreduce_total_latency = allreduce_total_latency
         self.latency = (
             matmul_total_latency
             + normlization_total_latency
