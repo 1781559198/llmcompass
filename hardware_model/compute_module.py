@@ -44,22 +44,23 @@ class SystolicArray:
         mac_per_cycle,
         input_word_size,
         output_word_size,
+        total_systolic_array_flops_per_cycle,
     ):
         self.array_height = array_height
         self.array_width = array_width
         self.mac_per_cycle = mac_per_cycle
         self.input_word_size = input_word_size
         self.output_word_size = output_word_size
-
+        self.total_systolic_array_flops_per_cycle = total_systolic_array_flops_per_cycle
 
 systolic_array_dict = {
-    "A100_fp16": SystolicArray(16, 16, 1, 2, 2),
-    "A100_int8": SystolicArray(16, 16, 2, 1, 4),
-    "TPUv3_bf16": SystolicArray(128, 128, 1, 2, 4),
-    "MI210_fp16": SystolicArray(16, 16, 0.5, 2, 2),
-    "TPUv3_new": SystolicArray(128, 128, 1, 2, 4),
+    "A100_fp16": SystolicArray(16, 16, 1, 2, 2, 16*16*1*2*2),
+    "A100_int8": SystolicArray(16, 16, 2, 1, 4, 16*16*2*1*4),
+    "TPUv3_bf16": SystolicArray(128, 128, 1, 2, 4, 128*128*1*2*4),
+    "MI210_fp16": SystolicArray(16, 16, 0.5, 2, 2, 16*16*0.5*2*2),
+    "TPUv3_new": SystolicArray(128, 128, 1, 2, 4, 128*128*1*2*4),
+    "G100_fp16": SystolicArray(64, 64, 1, 2, 2, 64*64*1*2*2),
 }
-
 
 class Core:
     def __init__(
@@ -67,7 +68,7 @@ class Core:
         vector_unit: VectorUnit,
         systolic_array: SystolicArray,
         systolic_array_count,
-        SRAM_size,
+        SRAM_size     # 添加默认参数
     ):
         self.vector_unit = vector_unit
         self.systolic_array = systolic_array
@@ -75,6 +76,8 @@ class Core:
         self.SRAM_size = SRAM_size  # Byte
         # assert(vector_unit.word_size==systolic_array.word_size)
         self.vector_word_size = vector_unit.word_size
+     
+        
 
 
 core_dict = {
@@ -88,7 +91,7 @@ core_dict = {
         vector_unit_dict["TPUv3_fp32"],
         systolic_array_dict["TPUv3_bf16"],
         2,
-        16 * 1024 * 1024,
+        16 * 1024 * 1024
     ),
     "CU_MI210_fp16": Core(
         vector_unit_dict["MI210_fp32"], systolic_array_dict["MI210_fp16"], 4, 128 * 1024
@@ -97,12 +100,13 @@ core_dict = {
         vector_unit_dict["TPUv3_new"],
         systolic_array_dict["TPUv3_new"],
         1,
-        8 * 1024 * 1024,
+        8 * 1024 * 1024
     ),
 }
 # compute_tile_dict={'SM_A100_int8':ComputeTile(512, 4096, 192*1024*8,3.41, 'TSMC N7', 128*8),'SM_A100_fp16':ComputeTile(512, 2048, 192*1024*8,3.41, 'TSMC N7', 128),}
 # flops: https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html#gpu-arch__fig2
 # area: https://pbs.twimg.com/media/FOT_-NJWUAARrtB?format=jpg&name=large
+
 
 
 class Overhead:
@@ -123,6 +127,7 @@ overhead_dict = {
     "A100": Overhead(2.1e-5, 1.2e-5, 4.5e-5, 4.5e-5, 4.0e-5, 3.5e-5, 3.5e-5, 2.0e-5, 1.0e-5, 2.5e-5),
     "TPUv3": Overhead(11e-5, 30e-5, 14e-5, 10e-5, 9.0e-5, 10e-5, 10e-5, 12e-5, 8e-5, 11e-5),
     "MI210": Overhead(3.4e-5, 2.2e-5, 2.8e-5, 2.1e-5, 2.0e-5, 2.0e-5, 2.0e-5, 3.0e-5, 1.5e-5, 2.7e-5),
+    "G100": Overhead(3.4e-5, 2.2e-5, 2.8e-5, 2.1e-5, 2.0e-5, 2.0e-5, 2.0e-5, 3.0e-5, 1.5e-5, 2.7e-5),
 }
 
 
@@ -134,13 +139,18 @@ class ComputeModule:
         clock_freq,
         l2_size,
         l2_bandwidth_per_cycle,
+        io_3d_dram_size,
+        io_3d_dram_bandwidth_per_cycle,
         overhead: Overhead = overhead_dict["A100"],
     ):
         self.core = core
         self.core_count = core_count
         self.clock_freq = clock_freq
-        self.l2_size = int(l2_size)  # Byte
+        self.l2_size = int(l2_size)  # global buffer
         self.l2_bandwidth_per_cycle = l2_bandwidth_per_cycle  # Byte/clock
+        self.io_3d_dram_size = io_3d_dram_size
+        self.io_3d_dram_bandwidth_per_cycle = io_3d_dram_bandwidth_per_cycle
+
         self.total_vector_flops_per_cycle = ( 
             core.vector_unit.total_vector_flops_per_cycle * core_count # 总向量flops
         )
@@ -164,6 +174,8 @@ compute_module_dict = {
         1.41e9,
         40 * 1024**2,
         5120,
+        0,
+        0,
         overhead_dict["A100"],
     ),
     "A100_int8": ComputeModule(
@@ -172,6 +184,8 @@ compute_module_dict = {
         1.41e9,
         40 * 1024**2,
         5120,
+        0,
+        0,
         overhead_dict["A100"],
     ),
     "TPUv3_bf16": ComputeModule(
@@ -180,6 +194,8 @@ compute_module_dict = {
         940e6,
         16 * 1024**3,
         490,
+        0,
+        0,
         overhead_dict["TPUv3"],
     ),
     "MI210_fp16": ComputeModule(
@@ -188,6 +204,8 @@ compute_module_dict = {
         1.4e9,
         8 * 1024**2,
         4096,
+        0,
+        0,
         overhead_dict["MI210"],
     ),
     "TPUv3_new": ComputeModule(
@@ -196,6 +214,8 @@ compute_module_dict = {
         940e6,
         16 * 1024**3,
         490,
+        0,
+        0,
         overhead_dict["TPUv3"],
     ),
 }

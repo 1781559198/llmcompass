@@ -1,3 +1,4 @@
+import argparse
 import json, re
 from hardware_model.compute_module import (
     VectorUnit,
@@ -15,6 +16,10 @@ from software_model.transformer import (
     TransformerBlockInitComputationTP,
     TransformerBlockAutoRegressionTP,
 )
+from software_model.llama2 import(
+    Llama2BlockInitComputationTP,
+    Llama2BlockAutoRegressionTP,
+)
 from software_model.utils import data_type_dict, Tensor
 from cost_model.cost_model import calc_compute_chiplet_area_mm2, calc_io_die_area_mm2
 from math import ceil
@@ -22,13 +27,15 @@ from math import ceil
 def read_architecture_template(file_path):
     with open(file_path, "r") as f:
         arch_specs = json.load(f)
+    # 读取布尔
     return arch_specs
 
 
 def template_to_system(arch_specs):
     device_specs = arch_specs["device"]
-    compute_chiplet_specs = device_specs["compute_chiplet"]
+    compute_chiplet_specs = device_specs["compute_chiplet"]# 芯片组
     io_specs = device_specs["io"]
+    io_3d_dram_specs = device_specs.get("io_3d_dram", None)# 3D DRAM
     core_specs = compute_chiplet_specs["core"]
     sublane_count = core_specs["sublane_count"]
     # vector unit
@@ -50,14 +57,18 @@ def template_to_system(arch_specs):
         systolic_array_specs["mac_per_cycle"],
         int(re.search(r"(\d+)", systolic_array_specs["data_type"]).group(1)) // 8,
         int(re.search(r"(\d+)", systolic_array_specs["data_type"]).group(1)) // 8,
+        sublane_count *systolic_array_specs["array_height"] * systolic_array_specs["array_width"] * systolic_array_specs["mac_per_cycle"] * 2
     )
     # core
+    
     core = Core(
         vector_unit,
         systolic_array,
-        sublane_count,
+        1 if core_specs.get("single_tpe", False) else sublane_count,
+        # systolic_array_count,
         core_specs["SRAM_KB"] * 1024,
     )
+
     # compute module
     compute_module = ComputeModule(
         core,
@@ -65,8 +76,31 @@ def template_to_system(arch_specs):
         device_specs["frequency_Hz"],
         io_specs["global_buffer_MB"] * 1024 * 1024,
         io_specs["global_buffer_bandwidth_per_cycle_byte"],
+        0 if io_3d_dram_specs is None else (io_3d_dram_specs["global_buffer_MB"] * 1024 * 1024),
+        0 if io_3d_dram_specs is None else io_3d_dram_specs["global_buffer_bandwidth_per_cycle_byte"],
         overhead_dict["A100"],
     )
+
+    # self.core = core
+    # self.core_count = core_count
+    # self.clock_freq = clock_freq
+    # self.l2_size = int(l2_size)  # global buffer
+    # self.l2_bandwidth_per_cycle = l2_bandwidth_per_cycle  # Byte/clock
+    # self.total_vector_flops_per_cycle = ( 
+    #     core.vector_unit.total_vector_flops_per_cycle * core_count # 总向量flops
+    # )
+    # self.total_vector_flops = self.total_vector_flops_per_cycle * clock_freq
+    # self.total_systolic_array_flops = ( # 总矩阵乘法flops计算
+    #     core_count # 核心数量
+    #     * core.systolic_array_count # 每个核心中矩阵乘法单元
+    #     * core.systolic_array.mac_per_cycle # 每个核心中矩阵乘法单元
+    #     * 2
+    #     * core.systolic_array.array_height # Systolic Array 的维度，表示矩阵乘法的规模
+    #     * core.systolic_array.array_width 
+    #     * clock_freq # 时钟频率
+    # )
+    # self.overhead = overhead
+
     # io module
     io_module = IOModule(
         io_specs["memory_channel_active_count"] # 活跃的内存通道数量
@@ -75,12 +109,25 @@ def template_to_system(arch_specs):
         // 8, # 字节转换
         1e-6,
     )
+
+    # io_3d_dram
+    if io_3d_dram_specs:
+        io_3d_dram = IOModule(
+            io_3d_dram_specs["memory_channel_active_count"]
+            * io_3d_dram_specs["pin_count_per_channel"]
+            * io_3d_dram_specs["bandwidth_per_pin_bit"]
+            // 8,
+            1e-6,
+        )
+    else:
+        io_3d_dram = None  # 或者设置一个默认值
+
     # memory module
     memory_module = MemoryModule(
         device_specs["memory"]["total_capacity_GB"] * 1024 * 1024 * 1024
     )
     # device
-    device = Device(compute_module, io_module, memory_module)
+    device = Device(compute_module, io_module, memory_module, io_3d_dram)
     # interconnect
     interconnect_specs = arch_specs["interconnect"]
     link_specs = interconnect_specs["link"]
@@ -108,8 +155,8 @@ def template_to_system(arch_specs):
 
 
 def test_template_to_system():
-    arch_specs = read_architecture_template("configs/template.json")
-    A100_system = template_to_system(arch_specs)
+    arch_specs, is_yizhu_g100 = read_architecture_template("configs/template.json")
+    A100_system = template_to_system(arch_specs, is_yizhu_g100)
     bs = 8
     s = 2048
     model = TransformerBlockInitComputationTP(
@@ -131,26 +178,47 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
     init_latency,
     output_seq_length,
     auto_regression_latency,
+    config_path,
+    model_type
     
 ):
     i=0
     smallest_total_area_mm2=float('inf')
     best_arch_specs=None
-    arch_specs = read_architecture_template("configs/template.json")
+    #arch_specs = read_architecture_template("configs/GA100.json")
+    # arch_specs = read_architecture_template("configs/G100.json")
+    arch_specs = read_architecture_template(config_path)
     for device_count in [4, 8, 12, 16]:
-        model_init = TransformerBlockInitComputationTP(
-                d_model=12288,
-                n_heads=96,
-                device_count=device_count,
-                data_type=data_type_dict["fp16"],
-            )
-        model_auto_regression = TransformerBlockAutoRegressionTP(
-                d_model=12288,
-                n_heads=96,
-                device_count=device_count,
-                data_type=data_type_dict["fp16"],)
-        _ = model_init(Tensor([batch_size, input_seq_length, model_init.d_model], data_type_dict["fp16"]))
-        _ = model_auto_regression(Tensor([batch_size, 1, model_init.d_model],data_type_dict["fp16"]), input_seq_length+output_seq_length)
+        if model_type == 'transformer':
+            model_init = TransformerBlockInitComputationTP(
+                    d_model=12288,
+                    n_heads=96,
+                    device_count=device_count,
+                    data_type=data_type_dict["fp16"],
+                )
+            model_auto_regression = TransformerBlockAutoRegressionTP(
+                    d_model=12288,
+                    n_heads=96,
+                    device_count=device_count,
+                    data_type=data_type_dict["fp16"],)
+        elif model_type == 'llama2':
+            model_init = Llama2BlockInitComputationTP(
+                    d_model=12288,
+                    n_heads=96,
+                    device_count=device_count,
+                    data_type=data_type_dict["fp16"],
+                )
+            model_auto_regression = Llama2BlockAutoRegressionTP(
+                    d_model=12288,
+                    n_heads=96,
+                    device_count=device_count,
+                    data_type=data_type_dict["fp16"],)
+        if model_type == 'transformer':
+            _ = model_init(Tensor([batch_size, input_seq_length, model_init.d_model], data_type_dict["fp16"]))
+            _ = model_auto_regression(Tensor([batch_size, 1, model_init.d_model],data_type_dict["fp16"]), input_seq_length+output_seq_length)
+        elif model_type == 'llama2':
+            _ = model_init(Tensor([batch_size, 1, model_init.d_model], data_type_dict["fp16"]))
+            _ = model_auto_regression(Tensor([batch_size, 1, model_init.d_model],data_type_dict["fp16"]), input_seq_length+output_seq_length)
         arch_specs["device_count"] = device_count
         if device_count <= 4:
             topology = "FC"
@@ -216,8 +284,8 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
                                         "HBM2e",
                                         "DDR5",
                                         "PCIe5",
-                                        "SRAM",
-                                        "3D_DRAM"
+                                        "yizhu_SRAM",
+                                        "yizhu_3D_DRAM"
                                         # "GDDR6X"
                                     ]:
                                         arch_specs['device']['memory_protocol']=memory_protocol
@@ -291,6 +359,31 @@ def find_cheapest_design(# 搜索计算硬件架构的最佳设计
 
 if __name__ == "__main__":
     # test_template_to_system()
-    find_cheapest_design(12288, 96, 96, 8, 2048, 5, 1024, 0.1)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config_type", type=str, choices=['g100', 'ga100', 'ga102_template', 'generate_template', 'G100', 'GA100', 'latency_design', 'mi210', 'template'], 
+                       default='g100',
+                       help="Choose config type: g100 or ga100")
+    parser.add_argument("--model_type", type=str, choices=['transformer', 'llama2'],
+                    default='transformer',
+                    help="Choose model type: transformer or llama2")
+    args = parser.parse_args()
+    
+    # 根据选择设置配置路径
+    config_path = {
+        'g100': "configs/G100.json",
+        'ga100': "configs/GA100.json",
+        'ga102_template': "configs/GA102_template.json",
+        'generate_template': "configs/generate_template.json",
+        'G100': "configs/G100.json",
+        'GA100': "configs/GA100.json",
+        'latency_design': "configs/latency_design.json",
+        'mi210': "configs/mi210.json",
+        'template': "configs/template.json",
+
+    }[args.config_type]
     
     
+    find_cheapest_design(12288, 96, 96, 8, 2048, 5, 1024, 0.1, config_path, args.model_type)
+
+
+

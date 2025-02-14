@@ -24,7 +24,7 @@
             "core": {
                 "sublane_count": 4,
                 "single_tpe": true,
-                "systolic_array": {
+                "systolic_array": { 
                     "array_width": 64,
                     "array_height": 64,
                     "data_type": "fp8",
@@ -37,7 +37,8 @@
                     "int32_count": 0,
                     "fp16_count": 64,
                     "fp32_count": 28,
-                    "fp64_count": 0
+                    "fp64_count": 0,
+                    "fp8_count": 0
                 },
                 "register_file": {
                     "num_reg_files": 1,
@@ -45,7 +46,7 @@
                     "register_bitwidth":32,
                     "num_rdwr_ports":4
                 },
-                "SRAM_KB": 256
+                "SRAM_KB": 128
             }
         },
         "memory_protocol": "PCIe5",
@@ -58,21 +59,21 @@
         ],
         "io": {
             "process_node": "7nm",
-            "global_buffer_MB": 16,
+            "global_buffer_MB": 128,
             "physical_global_buffer_MB": 224,
-            "global_buffer_bandwidth_per_cycle_byte": 640,
+            "global_buffer_bandwidth_per_cycle_byte": 8192,
             "memory_channel_physical_count": 8,
-            "memory_channel_active_count": 4,
+            "memory_channel_active_count": 64,
             "pin_count_per_channel": 1024,
             "bandwidth_per_pin_bit": 3.2e9
         },
-        "io-3d-dram": {
+        "io_3d_dram": {
             "process_node": "7nm",
-            "global_buffer_MB": 64,
+            "global_buffer_MB": 17280, 
             "physical_global_buffer_MB": 2048,
-            "global_buffer_bandwidth_per_cycle_byte": 360,
+            "global_buffer_bandwidth_per_cycle_byte": 8192,
             "memory_channel_physical_count": 8,
-            "memory_channel_active_count": 4,
+            "memory_channel_active_count": 64,
             "pin_count_per_channel": 1024,
             "bandwidth_per_pin_bit": 3.2e9
         },

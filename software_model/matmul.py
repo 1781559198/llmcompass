@@ -13,7 +13,6 @@ import os
 from scalesim.scale_sim import scalesim
 import copy
 
-
 class BatchedMatmul(Operator):
     def __init__(self, data_type: DataType):
         super().__init__(0, 0, 0, 0, data_type)
@@ -148,18 +147,31 @@ class Matmul(Operator):
         )
         self.flop_count = 2 * self.M * self.K * self.N
         self.io_count = self.M * self.K + self.K * self.N + self.M * self.N
+        self.io_count_3d_dram = self.K * self.N
+
         # print(f'{self.M}, {self.N}, {self.K}')
         return output
 
     def roofline_model(self, pcb_module: Device):
+        if pcb_module.io_3d_dram:
+            self.io_count = self.M * self.K + self.M * self.N
+
         self.roofline_latency = max(
             self.flop_count / pcb_module.compute_module.total_systolic_array_flops,
-            self.io_count
-            / min(
-                pcb_module.io_module.bandwidth,
-                pcb_module.compute_module.l2_bandwidth_per_cycle
-                * pcb_module.compute_module.clock_freq,
-            ),
+            max(
+                self.io_count
+                / min(
+                    pcb_module.io_module.bandwidth,
+                    pcb_module.compute_module.l2_bandwidth_per_cycle
+                    * pcb_module.compute_module.clock_freq,
+                ),
+                self.io_count_3d_dram
+                / min(
+                    pcb_module.io_3d_dram.bandwidth,
+                    pcb_module.compute_module.l2_bandwidth_per_cycle
+                    * pcb_module.compute_module.clock_freq,
+                ),
+            )
         )
         return self.roofline_latency
 
@@ -223,6 +235,7 @@ class Matmul(Operator):
             l2_tile_N: int,
             l2_tile_K: int,
             is_l2_double_buffering: bool,
+            is_l2_3d_dram_double_buffering: bool,
             l1_tile_M: int,
             l1_tile_N: int,
             l1_tile_K: int,
@@ -231,12 +244,13 @@ class Matmul(Operator):
             l0_M_tiling_factor: int,
             l0_N_tiling_factor: int,
             l0_K_tiling_factor: int,
-            dataflow: str = "os",
+            dataflow: str = "os",          
         ):
             self.l2_tile_M = l2_tile_M
             self.l2_tile_N = l2_tile_N
             self.l2_tile_K = l2_tile_K
             self.is_l2_double_buffering = is_l2_double_buffering
+            self.is_l2_3d_dram_double_buffering = is_l2_3d_dram_double_buffering
             self.l1_tile_M = l1_tile_M
             self.l1_tile_N = l1_tile_N
             self.l1_tile_K = l1_tile_K
@@ -250,7 +264,7 @@ class Matmul(Operator):
         def display(self):
             print(f'{"-"*10} Mapping {"-"*10}')
             print(
-                f"l2_tile_M: {self.l2_tile_M}, l2_tile_N: {self.l2_tile_N}, l2_tile_K: {self.l2_tile_K}, is_l2_double_buffering: {self.is_l2_double_buffering}, l2_loop_order: {self.l2_loop_order}"
+                f"l2_tile_M: {self.l2_tile_M}, l2_tile_N: {self.l2_tile_N}, l2_tile_K: {self.l2_tile_K}, is_l2_double_buffering: {self.is_l2_double_buffering}, is_l2_3d_dram_double_buffering: {self.is_l2_3d_dram_double_buffering},  l2_loop_order: {self.l2_loop_order}"
             )
             print(
                 f"l1_tile_M: {self.l1_tile_M}, l1_tile_N: {self.l1_tile_N}, l1_tile_K: {self.l1_tile_K}, l1_loop_order: {self.l1_loop_order}"
@@ -286,7 +300,6 @@ class Matmul(Operator):
             compile_mode == "heuristic-GPU"
             or compile_mode == "heuristic-our-throughput"
         ):
-            print(11111111111111111)
             working_set_size = M * K + N * K + M * N
             total_io_count = working_set_size * self.data_type.word_size
             io_latency = total_io_count / pcb_module.io_module.bandwidth
@@ -301,7 +314,32 @@ class Matmul(Operator):
                 compute_latency, io_latency
             )  # + pcb_module.io_module.latency * 2
             return self.latency
+        elif (M == 1 or N == 1) and (
+            compile_mode == "yizhu-g100"
+        ):
+            working_set_size = M * K + N * K + M * N if pcb_module.io_3d_dram is None else M * K + M * N # add
+            working_set_size_3d_dram = N * K if pcb_module.io_3d_dram is not None else 0 # add
+            total_io_count = working_set_size * self.data_type.word_size
+            total_io_count_3d_dram = working_set_size_3d_dram * self.data_type.word_size# add
+            io_latency = total_io_count / pcb_module.io_module.bandwidth
+            io_latency_3d_dram = total_io_count_3d_dram / pcb_module.io_3d_dram.bandwidth if pcb_module.io_3d_dram is not None else 0# add
+            total_flop_count = 2 * M * N * K
+            compute_latency = (
+                total_flop_count
+                / pcb_module.compute_module.core.vector_unit.total_vector_flops_per_cycle
+                / pcb_module.compute_module.core_count
+                / pcb_module.compute_module.clock_freq
+            )
+            compute_3d_dram_latency = 0
+            self.latency = max(
+                compute_latency + compute_3d_dram_latency, max(io_latency , io_latency_3d_dram) # add
+            )  # + pcb_module.io_module.latency * 2
+            self.latency = (
+                compute_latency + compute_3d_dram_latency + max(io_latency , io_latency_3d_dram) # add
+            )  # + pcb_module.io_module.latency * 2
+            return self.latency
         if compile_mode == "exhaustive":
+            is_l2_3d_dram_double_buffering = False
             for l2_tile_M_log2 in range(5, ceil(log2(self.computational_graph.M)) + 1):
                 l2_tile_M = 2**l2_tile_M_log2
                 for l2_tile_N_log2 in range(
@@ -319,7 +357,7 @@ class Matmul(Operator):
                         )
                         if (
                             working_set_size
-                            > pcb_module.compute_module.l2_size
+                            > pcb_module.compute_module.l2_size# global buffer
                             // self.data_type.word_size
                         ):
                             continue
@@ -332,21 +370,38 @@ class Matmul(Operator):
                             is_l2_double_buffering = True
                         else:
                             is_l2_double_buffering = False
+                        assert is_l2_double_buffering
+
                         for l1_tile_M_log2 in range(5, l2_tile_M_log2 + 1):
                             l1_tile_M = 2**l1_tile_M_log2
                             for l1_tile_N_log2 in range(5, l2_tile_N_log2 + 1):
                                 l1_tile_N = 2**l1_tile_N_log2
                                 for l1_tile_K_log2 in range(5, l2_tile_K_log2 + 1):
                                     l1_tile_K = 2**l1_tile_K_log2
-                                    if (
-                                        l1_tile_M * l1_tile_N
-                                        + l1_tile_N * l1_tile_K
-                                        + l1_tile_M * l1_tile_K
-                                        > pcb_module.compute_module.core.SRAM_size
-                                        // self.data_type.word_size
-                                        // 2
-                                    ):
-                                        continue
+                                    if pcb_module.io_3d_dram:
+                                        if (
+                                            l1_tile_M * l1_tile_N
+                                            + l1_tile_M * l1_tile_K
+                                            > pcb_module.compute_module.core.SRAM_size# local buffer
+                                            // self.data_type.word_size
+                                            // 2
+                                        ) or (
+                                            l1_tile_N * l1_tile_K
+                                            > pcb_module.compute_module.io_3d_dram_size
+                                            // self.data_type.word_size
+                                            // 2
+                                        ):
+                                            continue
+                                    else:
+                                        if (
+                                            l1_tile_M * l1_tile_N
+                                            + l1_tile_N * l1_tile_K
+                                            + l1_tile_M * l1_tile_K
+                                            > pcb_module.compute_module.core.SRAM_size# local buffer
+                                            // self.data_type.word_size
+                                            // 2
+                                        ):
+                                            continue
                                     for l2_loop_order in [
                                         "mkn",
                                         "mnk",
@@ -375,6 +430,7 @@ class Matmul(Operator):
                                                     l2_tile_N,
                                                     l2_tile_K,
                                                     is_l2_double_buffering,
+                                                    is_l2_3d_dram_double_buffering,
                                                     l1_tile_M,
                                                     l1_tile_N,
                                                     l1_tile_K,
@@ -394,6 +450,7 @@ class Matmul(Operator):
                                                     best_mapping = mapping
         elif compile_mode == "heuristic-our-throughput":
             i = 0
+            is_l2_3d_dram_double_buffering = False
             for l2_tile_M in [32, 64, 128, 256, 512, 1024, 2048, 4096]:
                 for l2_tile_N in [
                     l2_tile_M // 4,
@@ -422,6 +479,7 @@ class Matmul(Operator):
                         + l2_tile_M * l2_tile_K
                         + l2_tile_M * l2_tile_N
                     )
+
                     if (
                         working_set_size
                         > pcb_module.compute_module.l2_size // self.data_type.word_size
@@ -436,7 +494,6 @@ class Matmul(Operator):
                         is_l2_double_buffering = True
                     else:
                         is_l2_double_buffering = False
-
                     assert is_l2_double_buffering
 
                     for l1_tile_M in [32, 64, 128, 256]:
@@ -482,6 +539,7 @@ class Matmul(Operator):
                                 l2_tile_N,
                                 l2_tile_K,
                                 is_l2_double_buffering,
+                                is_l2_3d_dram_double_buffering,
                                 l1_tile_M,
                                 l1_tile_N,
                                 l1_tile_K,
@@ -504,8 +562,7 @@ class Matmul(Operator):
                                 best_mapping = mapping
         elif compile_mode == "heuristic-GPU":
             i = 0
-            print(22222222222222222)
-            for l2_tile_M in [64, 128, 256, 512, 1024, 2048]:# 因子选择
+            for l2_tile_M in [64, 128, 256, 512, 1024, 2048]:
                 for l2_tile_N in [l2_tile_M // 2, l2_tile_M, l2_tile_M * 2]:
                     if K <= 12288:
                         l2_K_tiling_factor_list = [1, 2, 4, 8]
@@ -521,7 +578,7 @@ class Matmul(Operator):
                             self.computational_graph.K / l2_K_tiling_factor
                         )
                         l2_tile_K = 2 ** floor(log2(l2_tile_K))
-                        working_set_size = (# 计算工作tile大小
+                        working_set_size = (
                             l2_tile_N * l2_tile_K
                             + l2_tile_M * l2_tile_K
                             + l2_tile_M * l2_tile_N
@@ -541,7 +598,7 @@ class Matmul(Operator):
                             is_l2_double_buffering = True
                         else:
                             is_l2_double_buffering = False
-                        # L1
+
                         for l1_tile_M in [32, 64, 128, 256]:
                             if l1_tile_M > min(l2_tile_M, l2_tile_N):
                                 continue
@@ -552,7 +609,7 @@ class Matmul(Operator):
                                     l1_tile_M * l1_tile_N
                                     + l1_tile_N * l1_tile_K
                                     + l1_tile_M * l1_tile_K
-                                    > pcb_module.compute_module.core.SRAM_size# local buffer
+                                    > pcb_module.compute_module.core.SRAM_size
                                     // self.data_type.word_size
                                     // 2
                                 ):
@@ -594,12 +651,135 @@ class Matmul(Operator):
                                         min_cycle_count = cycle_count
                                         best_mapping = mapping
             # print("total dse times:", i)
+        elif compile_mode == "yizhu-g100":
+            i = 0
+            is_l2_3d_dram_double_buffering = False
+            # for l2_tile_M in [64, 128, 256, 512, 1024, 2048]:# 因子选择
+            #     for l2_tile_N in [l2_tile_M // 2, l2_tile_M, l2_tile_M * 2]:
+            #         if K <= 12288:
+            #             l2_K_tiling_factor_list = [1, 2, 4, 8]
+            #         else:
+            #             l2_K_tiling_factor_list = [
+            #                 K // 1024,
+            #                 K // 2048,
+            #                 K // 4096,
+            #                 K // 8192,
+            #             ]
+            #         for l2_K_tiling_factor in l2_K_tiling_factor_list:
+            #             l2_tile_K = ceil(
+            #                 self.computational_graph.K / l2_K_tiling_factor
+            #             )
+            l2_tile_M = ceil(M / 32)
+            l2_tile_N = ceil(N / 32) 
+            l2_tile_K = ceil(K / 32)
+            l2_tile_K = 2 ** floor(log2(l2_tile_K))
+            working_set_size = (# 计算工作tile大小
+                l2_tile_N * l2_tile_K
+                + l2_tile_M * l2_tile_K
+                + l2_tile_M * l2_tile_N
+            ) 
+            working_set_size = (
+                l2_tile_M * l2_tile_K
+                + l2_tile_M * l2_tile_N
+            )
+            working_set_size_3d_dram = l2_tile_N * l2_tile_K
+
+            if (
+                working_set_size
+                > pcb_module.compute_module.l2_size# global buffer
+                // self.data_type.word_size
+            ):
+                is_l2_double_buffering = True
+            elif (
+                working_set_size
+                <= pcb_module.compute_module.l2_size
+                // self.data_type.word_size
+                // 2
+            ):
+                is_l2_double_buffering = False
+
+            # 计算3d dram
+            if (
+                working_set_size_3d_dram
+                > pcb_module.compute_module.io_3d_dram_size
+                // self.data_type.word_size
+            ):
+                is_l2_3d_dram_double_buffering = True
+            elif (
+                working_set_size_3d_dram
+                <= pcb_module.compute_module.io_3d_dram_size
+                // self.data_type.word_size
+                // 2
+            ):
+                is_l2_3d_dram_double_buffering = False
+
+            # L1
+            
+            for l1_tile_N in [16, 32, 64, 128, 256]:
+                if l1_tile_N > l2_tile_N:
+                    continue
+                l1_tile_M = l2_tile_M# l2_tile_M = 1
+                for l1_K_tiling_factor in [1, 2, 4, 8, 16, 32]:
+                    l1_tile_K = ceil(l2_tile_K / l1_K_tiling_factor)
+                    if (
+                        l1_tile_M * l1_tile_N
+                        + l1_tile_M * l1_tile_K
+                        > pcb_module.compute_module.core.SRAM_size# local buffer
+                        // self.data_type.word_size
+                        // 2
+                    ) or (
+                        l1_tile_N * l1_tile_K
+                        > pcb_module.compute_module.io_3d_dram_size
+                        // self.data_type.word_size
+                        // 2
+                    ):
+                        continue      
+
+                    l2_loop_order = "knm"
+                    l1_loop_order = "knm"
+                    for (
+                        l0_M_tiling_factor,
+                        l0_N_tiling_factor,
+                        l0_K_tiling_factor,
+                    ) in self.find_permutations(
+                        pcb_module.compute_module.core.systolic_array_count
+                    ):
+                        i += 1
+                        start = time.time()
+                        mapping = self.Mapping(
+                            l2_tile_M,
+                            l2_tile_N,
+                            l2_tile_K,
+                            is_l2_double_buffering,
+                            is_l2_3d_dram_double_buffering,
+                            l1_tile_M,
+                            l1_tile_N,
+                            l1_tile_K,
+                            l2_loop_order,
+                            l1_loop_order,
+                            l0_M_tiling_factor,
+                            l0_N_tiling_factor,
+                            l0_K_tiling_factor,
+                        )
+                        cycle_count = self.simulate(
+                            self.computational_graph,
+                            mapping,
+                            pcb_module,
+                        )
+                        end = time.time()
+                        # if i % 1000 == 0:
+                        #     print(f"{i} simulation time: {end-start}")
+                        if cycle_count < min_cycle_count:
+                            min_cycle_count = cycle_count
+                            best_mapping = mapping
+            # print("total dse times:", i)
         elif compile_mode == "heuristic-TPU":
             l2_tile_M = self.computational_graph.M
             l2_tile_N = self.computational_graph.N
             l2_tile_K = self.computational_graph.K
 
             is_l2_double_buffering = True
+            is_l2_3d_dram_double_buffering = False
             for l1_tile_M in [l2_tile_M, 64, 128, 256, 512, 1024, 2048, 4096, 8192]:
                 if l1_tile_M > l2_tile_M * 2:
                     continue
@@ -641,6 +821,7 @@ class Matmul(Operator):
                             l2_tile_N,
                             l2_tile_K,
                             is_l2_double_buffering,
+                            is_l2_3d_dram_double_buffering,
                             l1_tile_M,
                             l1_tile_N,
                             l1_tile_K,
@@ -668,6 +849,7 @@ class Matmul(Operator):
             l2_tile_K = self.computational_graph.K
 
             is_l2_double_buffering = True
+            is_l2_3d_dram_double_buffering = False
             for l1_tile_M in [l2_tile_M, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192]:
                 if l1_tile_M > l2_tile_M * 2:
                     continue
@@ -709,6 +891,7 @@ class Matmul(Operator):
                             l2_tile_N,
                             l2_tile_K,
                             is_l2_double_buffering,
+                            is_l2_3d_dram_double_buffering,
                             l1_tile_M,
                             l1_tile_N,
                             l1_tile_K,
@@ -733,8 +916,8 @@ class Matmul(Operator):
         else:
             raise ValueError(f"compile_mode {compile_mode} not supported")
         self.best_mapping = best_mapping
-        if self.best_mapping is not None:
-             self.best_mapping.display()
+        #if self.best_mapping is not None:
+        #    self.best_mapping.display()
         self.best_cycle_count = min_cycle_count
         self.best_latency = min_cycle_count / pcb_module.compute_module.clock_freq
         self.latency = self.best_latency
@@ -749,7 +932,8 @@ class Matmul(Operator):
     ) -> int:
         if self.look_up_table is None:
             self.look_up_table = pd.read_csv(
-                f"./systolic_array_model/look_up_table_{pcb_module.compute_module.core.systolic_array.array_height}_{pcb_module.compute_module.core.systolic_array.array_width}.csv",
+                #f"./systolic_array_model/look_up_table_{pcb_module.compute_module.core.systolic_array.array_height}_{pcb_module.compute_module.core.systolic_array.array_width}.csv",
+                f"./systolic_array_model/look_up_table_64_64.csv",
                 header=None,
                 names=[
                     "M",
@@ -790,17 +974,38 @@ class Matmul(Operator):
         l2_tile_N = mapping.l2_tile_N
         l2_tile_K = mapping.l2_tile_K
 
-        if mapping.is_l2_double_buffering:
-            assert (
-                l2_tile_M * l2_tile_N + l2_tile_N * l2_tile_K + l2_tile_M * l2_tile_K
-                <= pcb_module.compute_module.l2_size // self.data_type.word_size // 2
-            )
-        else:
-            assert (
-                l2_tile_M * l2_tile_N + l2_tile_N * l2_tile_K + l2_tile_M * l2_tile_K
-                <= pcb_module.compute_module.l2_size // self.data_type.word_size
-            )
 
+        if pcb_module.io_3d_dram:
+            if mapping.is_l2_double_buffering:
+                assert (
+                    l2_tile_M * l2_tile_N +  l2_tile_M * l2_tile_K
+                    <= pcb_module.compute_module.l2_size // self.data_type.word_size // 2 # global buffer
+                )
+            else:
+                assert (
+                    l2_tile_M * l2_tile_N + l2_tile_M * l2_tile_K
+                    <= pcb_module.compute_module.l2_size // self.data_type.word_size
+                )
+            if mapping.is_l2_3d_dram_double_buffering:
+                assert(
+                    l2_tile_N * l2_tile_K <= pcb_module.compute_module.io_3d_dram_size // self.data_type.word_size // 2
+                )
+            else:
+                assert(
+                    l2_tile_N * l2_tile_K <= pcb_module.compute_module.io_3d_dram_size // self.data_type.word_size
+                )
+        else:
+            if mapping.is_l2_double_buffering:
+                assert (
+                    l2_tile_M * l2_tile_N + l2_tile_N * l2_tile_K + l2_tile_M * l2_tile_K
+                    <= pcb_module.compute_module.l2_size // self.data_type.word_size // 2 # global buffer
+                )
+            else:
+                assert (
+                    l2_tile_M * l2_tile_N + l2_tile_N * l2_tile_K + l2_tile_M * l2_tile_K
+                    <= pcb_module.compute_module.l2_size // self.data_type.word_size
+                )
+               
         M_l2_t = M // l2_tile_M
         N_l2_t = N // l2_tile_N
         K_l2_t = K // l2_tile_K
@@ -903,6 +1108,8 @@ class Matmul(Operator):
         previous_m = 0
         previous_n = 0
         previous_k = 0
+        current_tile_3d_dram_read_cycle_count = 0
+        total_cycle_count_3d_dram = 0
 
         for m, n, k in self.generate_tile_loops(
             ceil(M / l2_tile_M),
@@ -916,16 +1123,19 @@ class Matmul(Operator):
             l2_tile = l2_tiles[m, n, k]
             previous_l2_tile = l2_tiles[previous_m, previous_n, previous_k]
 
-            # 这里是为了不同 tile 的计算之间存在数据依赖性，某些方向的 tile 可能会重复使用上一方向的部分数据
+            # 这里是为了不同 tile 的计算之间存在数据依赖性，某些方向的 tile 可能会重复使上一方向的部分数据
             # current tile read latency
             if m == previous_m and k == previous_k:# 当前的tile的m和k与前一个tile相同，仅加载k * n 的数据
                 current_tile_read_cycle_count = l2_tile.K_N_io_cycle_count
             elif n == previous_n and k == previous_k:# 当前的tile的n和k与前一个tile相同，仅加载m * k 的数据
                 current_tile_read_cycle_count = l2_tile.M_K_io_cycle_count
             else:# 否则同时加载m * k, k * n 的数据
-                current_tile_read_cycle_count = (
-                    l2_tile.M_K_io_cycle_count + l2_tile.K_N_io_cycle_count
-                )
+                if pcb_module.io_3d_dram:# 如果是g100，则取最大值
+                    current_tile_read_cycle_count = l2_tile.M_K_io_cycle_count
+                    current_tile_3d_dram_read_cycle_count = l2_tile.K_N_io_cycle_count
+                else:
+                    current_tile_read_cycle_count =l2_tile.M_K_io_cycle_count + l2_tile.K_N_io_cycle_count
+                         
             if k > 0 and not (m == previous_m and n == previous_n):# 如果k发生了变化，还得加载m * n 的结果
                 current_tile_read_cycle_count += l2_tile.M_N_io_cycle_count
 
@@ -958,6 +1168,26 @@ class Matmul(Operator):
                     + previous_tile_write_cycle_count
                 )
 
+            if pcb_module.io_3d_dram:
+                if mapping.is_l2_3d_dram_double_buffering:  # pipelined
+                    total_cycle_count_3d_dram += (
+                        max(# 双缓冲的时候，数据加载（current_tile_read_cycle_count）和前一个 tile 的计算（previous_tile_compute_cycle_count）
+                            # 是并行进行的，但这两个操作的执行时间可能不同，取最大值
+                            current_tile_3d_dram_read_cycle_count, previous_tile_compute_cycle_count
+                        )
+                        + previous_tile_write_cycle_count
+                )
+                else:  # non-pipelined
+                    total_cycle_count_3d_dram += (
+                        current_tile_3d_dram_read_cycle_count
+                        + previous_tile_compute_cycle_count
+                        + previous_tile_write_cycle_count
+                    )
+            else:
+                total_cycle_count_3d_dram = 0
+
+            total_cycle_count = max(total_cycle_count, total_cycle_count_3d_dram)
+
             previous_m = m
             previous_n = n
             previous_k = k
@@ -970,6 +1200,8 @@ class Matmul(Operator):
 
         if previous_k > 0:
             total_cycle_count += ceil(l2_tiles[-1, -1, -1].K_reduction_cycle_count)
+
+
 
         return total_cycle_count #+ ceil(
         # pcb_module.io_module.latency * 2 * pcb_module.compute_module.clock_freq
@@ -991,7 +1223,7 @@ class Matmul(Operator):
             self.N = N
             self.K = K
             self.K_reduction_cycle_count = ceil(# 跟vector unit有关
-                M * N / pcb_module.compute_module.total_vector_flops_per_cycle# 一个周期可以执行的浮点次数运算，
+                M * N / pcb_module.compute_module.total_vector_flops_per_cycle# 一个周期可以执行的浮点次数运算��
             ) + 2 * ceil(# 读入和写出
                 M
                 * N
@@ -1002,9 +1234,16 @@ class Matmul(Operator):
             self.M_K_io_cycle_count = self.simulate_l2_tile_io_cycle_count(
                 M, K, data_type, pcb_module
             )
-            self.K_N_io_cycle_count = self.simulate_l2_tile_io_cycle_count(
-                K, N, data_type, pcb_module
-            )
+
+            if pcb_module.io_3d_dram:
+                self.K_N_io_cycle_count = self.simulate_l2_tile_io_3d_dram_cycle_count(
+                    K, N, data_type, pcb_module
+                ) 
+            else:
+                self.K_N_io_cycle_count = self.simulate_l2_tile_io_cycle_count(
+                    K, N, data_type, pcb_module
+                ) 
+            
             self.M_N_io_cycle_count = self.simulate_l2_tile_io_cycle_count(
                 M, N, data_type, pcb_module
             )
@@ -1014,7 +1253,7 @@ class Matmul(Operator):
 
         def simulate_l2_tile_io_cycle_count(
             self, M: int, N: int, data_type: DataType, chiplet_module: Device
-        ):
+        ):# io
             return ceil(
                 M
                 * N
@@ -1022,8 +1261,19 @@ class Matmul(Operator):
                 / (
                     chiplet_module.io_module.bandwidth
                     / chiplet_module.compute_module.clock_freq
-                )
-            )
+                ))
+        
+        def simulate_l2_tile_io_3d_dram_cycle_count(
+            self, M: int, N: int, data_type: DataType, chiplet_module: Device
+        ):
+             return ceil(
+                M
+                * N
+                * data_type.word_size
+                / (
+                    chiplet_module.io_3d_dram.bandwidth
+                    / chiplet_module.compute_module.clock_freq
+                ))   
 
         def simulate_l2_tile_compute_cycle_count(
             self,
@@ -1223,12 +1473,13 @@ class Matmul(Operator):
                     current_batch_Read_M_N[temp_m, temp_n] = temp_k > 0
                     current_batch_Write_M_N[temp_m, temp_n] = 1
                     temp_l1_tile_compute_cycle_count = temp_l1_tile.compute_cycle_count
-                    if temp_k > 0:
-                        temp_l1_tile_compute_cycle_count += ceil(
-                            temp_l1_tile.M
-                            * temp_l1_tile.N
-                            / chiplet_module.compute_module.core.vector_unit.total_vector_flops_per_cycle
-                        )
+                    if not chiplet_module.io_3d_dram:
+                        if temp_k > 0:
+                            temp_l1_tile_compute_cycle_count += ceil(
+                                temp_l1_tile.M
+                                * temp_l1_tile.N
+                                / chiplet_module.compute_module.core.vector_unit.total_vector_flops_per_cycle
+                            )
                     current_batch_compute_cycle_count = max(# 当前批次极端最慢的tile的
                         current_batch_compute_cycle_count,
                         temp_l1_tile_compute_cycle_count,
@@ -1256,25 +1507,50 @@ class Matmul(Operator):
                     * M_N_tile_size
                 )
 
-                # read current batch while compute and write previous batch
+             # read current batch while compute and write previous batch
                 current_batch_read_count = (
                     current_batch_M_K_read_count
                     + current_batch_K_N_read_count
                     + current_batch_M_N_read_count
                 )
+                if chiplet_module.io_3d_dram:
+                    current_batch_read_count = (
+                        current_batch_M_K_read_count
+                        + current_batch_M_N_read_count
+                    )
+                    current_batch_3d_dram_read_count = current_batch_K_N_read_count
+                else:
+                    current_batch_3d_dram_read_count = 0
+                current_batch_read_count = current_batch_read_count + current_batch_3d_dram_read_count
+
                 current_batch_read_cycle_count = ceil(
                     current_batch_read_count
                     * chiplet_module.compute_module.core.systolic_array.input_word_size
                     / chiplet_module.compute_module.l2_bandwidth_per_cycle
                 )
+                if chiplet_module.io_3d_dram:
+                    current_batch_read_cycle_count = ceil(
+                    current_batch_read_count
+                    * chiplet_module.compute_module.core.vector_unit.word_size
+                        / chiplet_module.compute_module.l2_bandwidth_per_cycle
+                    )
+                    current_batch_read_3d_dramcycle_count = ceil(
+                    current_batch_3d_dram_read_count
+                    * chiplet_module.compute_module.core.systolic_array.input_word_size
+                        / chiplet_module.compute_module.io_3d_dram_bandwidth_per_cycle
+                    )
+                else:
+                    current_batch_read_3d_dramcycle_count = 0
+                current_batch_read_cycle_count =current_batch_read_cycle_count + current_batch_read_3d_dramcycle_count
+
                 prvious_batch_write_cycle_count = ceil(
                     previous_batch_M_N_write_count
-                    * chiplet_module.compute_module.core.systolic_array.output_word_size
+                    * chiplet_module.compute_module.core.vector_unit.word_size
                     / chiplet_module.compute_module.l2_bandwidth_per_cycle
                 )
 
                 total_cycle_count += (
-                    max(
+                    max(# 取读取和计算的最大值
                         current_batch_read_cycle_count,
                         previous_batch_compute_cycle_count,
                     )
@@ -1290,7 +1566,7 @@ class Matmul(Operator):
                 active_l1_tile_list = []
 
             # last batch's compute and write
-            total_cycle_count += previous_batch_compute_cycle_count + ceil(
+            total_cycle_count += previous_batch_compute_cycle_count + ceil(# 上一批次的计算和这一批次的写入
                 np.sum(previous_batch_Write_M_N * M_N_tile_size)
                 * data_type.word_size
                 / chiplet_module.compute_module.l2_bandwidth_per_cycle
@@ -1327,12 +1603,28 @@ class Matmul(Operator):
             chiplet_module: Device,
             look_up_table: pd.DataFrame,
         ):
-            assert (
-                M * K + K * N + M * N
-                <= chiplet_module.compute_module.core.SRAM_size
-                // data_type.word_size
-                // 2
-            )
+            if chiplet_module.io_3d_dram:
+                if M * K + M * N > chiplet_module.compute_module.core.SRAM_size // data_type.word_size // 2:
+                    return float('inf')
+                assert(
+                    M * K + M * N
+                    <= chiplet_module.compute_module.core.SRAM_size
+                    // data_type.word_size
+                    // 2
+                )
+                assert(
+                    K * N
+                    <= chiplet_module.compute_module.io_3d_dram_size
+                    // data_type.word_size
+                    // 2
+                )
+            else:
+                assert (
+                    M * K + K * N + M * N
+                    <= chiplet_module.compute_module.core.SRAM_size
+                    // data_type.word_size
+                    // 2
+                )
 
             M_tiling_factor = mapping.l0_M_tiling_factor
             N_tiling_factor = mapping.l0_N_tiling_factor
@@ -1353,7 +1645,8 @@ class Matmul(Operator):
                     chiplet_module.compute_module.core.systolic_array.mac_per_cycle,
                     mapping.dataflow,
                 )
-                + (K_tiling_factor - 1)
+                + 
+                (K_tiling_factor - 1)# 累加操作
                 * M
                 * N
                 / chiplet_module.compute_module.core.vector_unit.total_vector_flops_per_cycle
@@ -1376,7 +1669,7 @@ class Matmul(Operator):
         assert M * N * K * array_height * array_width * mac_per_clock != 0
         if M >= array_height and N >= array_width:
             if (
-                M * N * K / array_height / array_width / max(array_height, array_width)
+                M * N * K / array_height / array_width / max(array_height, array_width)# 得到最小周期数
                 >= 128
             ):
                 return ceil(
@@ -1413,6 +1706,7 @@ class Matmul(Operator):
             cycle_count = look_up_table.loc[
                 (M, N, K, array_height, array_width, dataflow), "cycle_count"
             ].item()
+            # print(M, N, K, array_height, array_width, dataflow)
         except KeyError:
             try:
                 cycle_count = look_up_table.loc[

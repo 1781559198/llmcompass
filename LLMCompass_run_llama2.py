@@ -4,7 +4,7 @@ from software_model.utils import DataType, data_type_dict
 from software_model.utils import data_type_dict, Tensor
 
 
-specs = read_architecture_template(r"configs\mi210.json")
+specs = read_architecture_template(r"configs\G100.json")
 system = template_to_system(specs)
 
 #定义序列长度和批次大小
@@ -24,7 +24,7 @@ _ = model_auto_regression(
 
 print("Starting simulation...")
 auto_regression_latency_simulated = model_auto_regression.compile_and_simulate(
-	system, "heuristic-GPU"
+	system, "yizhu-g100"
 )
 
 # auto_regression_latency_simulated = model_auto_regression.run_on_gpu(

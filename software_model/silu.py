@@ -25,6 +25,30 @@ class SiLU(Operator):
         )
         return input
 
+    def roofline_model(self, pcb_module: Device):
+        self.computational_graph.data_type = (
+            pcb_module.compute_module.core.vector_unit.data_type
+        )
+        M = self.M
+        data_type = self.computational_graph.data_type
+        total_io_count = M * 2 * data_type.word_size
+        io_latency = (
+            total_io_count / min(pcb_module.io_module.bandwidth
+            , pcb_module.compute_module.l2_bandwidth_per_cycle
+            * pcb_module.compute_module.clock_freq)
+        )
+        total_flop_count = M * (
+            10 + pcb_module.compute_module.core.vector_unit.flops_per_exp
+        )
+        compute_latency = (
+            total_flop_count
+            / pcb_module.compute_module.core.vector_unit.total_vector_flops_per_cycle
+            / pcb_module.compute_module.core_count
+            / pcb_module.compute_module.clock_freq
+        )
+        self.roofline_latency = max(compute_latency, io_latency)
+        return self.roofline_latency
+
     def print_latency(self):
         print(f"{self.shape}, {self.latency_on_gpu * 1e6}us")
 
@@ -282,3 +306,4 @@ class SiLU(Operator):
                 total_flop_count
                 / pcb_module.compute_module.core.vector_unit.total_vector_flops_per_cycle
             )
+
